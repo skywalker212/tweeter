@@ -1,5 +1,10 @@
 -module(cache).
--export([insert/2, lookup/1, delete/1]).
+-export([
+    insert/2,
+    insert/3,
+    lookup/1,
+    delete/1
+]).
 
 insert(Key, Value) ->
     case c_store:lookup(Key) of
@@ -7,6 +12,15 @@ insert(Key, Value) ->
             c_element:replace(Pid, Value);
         {error, _} ->
             {ok, Pid} = c_element:create(Value),
+            c_store:insert(Key, Pid)
+    end.
+
+insert(Key, Value, LeaseTime) ->
+    case c_store:lookup(Key) of
+        {ok, Pid} ->
+            c_element:replace(Pid, Value);
+        {error, _} ->
+            {ok, Pid} = c_element:create(Value, LeaseTime),
             c_store:insert(Key, Pid)
     end.
 

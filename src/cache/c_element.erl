@@ -18,7 +18,7 @@
 ]).
 -define(SERVER, ?MODULE).
 %% the default number of seconds that a key/ value pair can live in the cache without being evicted
--define(DEFAULT_LEASE_TIME, 10).
+-define(DEFAULT_LEASE_TIME, infinity).
 -record(state, {value, lease_time, start_time}).
 
 %% API Section to be used by other modules to invoke functions of c_element
