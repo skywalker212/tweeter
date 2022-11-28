@@ -17,11 +17,30 @@ start_link() ->
 init([]) ->
     {ok, #state{}}.
 
-handle_call(_Msg, From, State) ->
-    {ok, Handler} = t_worker:start_link(),
-    gen_server:cast(Handler, {test, From}),
+handle_call({register, UserID}, From, State) ->
+    spawn(t_worker, register_account, [From, UserID]),
+    {reply, ok, State};
+handle_call({tweet, UserID, TweetContent}, From, State) ->
+    spawn(t_worker, publish_tweet, [From, UserID, TweetContent]),
+    {reply, ok, State};
+handle_call({follow, UserID, FollowerID}, From, State) ->
+    spawn(t_worker, follow_user, [From, UserID, FollowerID]),
+    {reply, ok, State};
+handle_call({re_tweet, UserID, TweetID}, From, State) ->
+    spawn(t_worker, re_tweet, [From, UserID, TweetID]),
+    {reply, ok, State};
+handle_call({mentions, UserID}, From, State) ->
+    spawn(t_worker, mentions, [From, UserID]),
+    {reply, ok, State};
+handle_call({query, Query}, From, State) ->
+    spawn(t_worker, query, [From, Query]),
     {reply, ok, State}.
 
+%% would be useful when implementing websockets
+% handle_cast(Msg, State) ->
+%     {ok, Handler} = t_worker:start_link(),
+%     gen_server:cast(Handler, Msg),
+%     {noreply, State};
 handle_cast(stop, State) ->
     {stop, normal, State}.
 
