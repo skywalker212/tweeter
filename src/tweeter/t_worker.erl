@@ -1,4 +1,4 @@
--module(tweeter).
+-module(t_worker).
 -behaviour(gen_server).
 -export([start_link/0]).
 
@@ -12,16 +12,17 @@
 -record(state, {}).
 
 start_link() ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+    gen_server:start_link(?MODULE, [], []).
 
 init([]) ->
     {ok, #state{}}.
 
-handle_call(_Msg, From, State) ->
-    {ok, Handler} = t_worker:start_link(),
-    gen_server:cast(Handler, {test, From}),
-    {reply, ok, State}.
+handle_call(_Msg, _From, _State) ->
+    ok.
 
+handle_cast({test, From}, State) ->
+    gen_server:reply(From, {ok, test}),
+    {stop, normal, State};
 handle_cast(stop, State) ->
     {stop, normal, State}.
 
