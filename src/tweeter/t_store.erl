@@ -5,29 +5,34 @@
 
 %% API
 -export([
-    save_user/1,
+    save_user/2,
     get_user/1,
     follow_user/2,
+    get_followers/1,
     save_tweet/3,
     save_tweet/5,
     get_tweet/1,
+    get_retweet_content/1,
     re_tweet/3,
     quote_tweet/4,
     reply_tweet/4,
     like_tweet/2,
     get_user_tweets/1,
     get_user_tweets/2,
-    query_tweets/1
+    query_tweets/1,
+    get_user_pid/1
 ]).
 
 -define(USER_TABLE_NAME, user).
 -define(TWEET_TABLE_NAME, tweet).
 -define(MENTION_TABLE_NAME, mention).
 -define(HASHTAG_TABLE_NAME, hashtag).
+-define(PID_TABLE_NAME, pid).
 
 -record(user, {
     id,
     following = sets:new([{version, 2}]),
+    followers = sets:new([{version, 2}]),
     created_at = util:get_utc_seconds()
 }).
 -record(tweet, {
@@ -51,6 +56,7 @@ init() ->
     ets:new(?TWEET_TABLE_NAME, [{keypos, #tweet.id} | TableOptions]),
     ets:new(?MENTION_TABLE_NAME, TableOptions),
     ets:new(?HASHTAG_TABLE_NAME, TableOptions),
+    ets:new(?PID_TABLE_NAME, TableOptions),
     ok.
 
 get_value(TableName, TableKey) ->
@@ -59,25 +65,38 @@ get_value(TableName, TableKey) ->
         [] -> null
     end.
 
-save_user(ID) ->
-    ets:insert(?USER_TABLE_NAME, #user{id = ID}),
+save_user(ID, PID) ->
+    %% dont overwrite existing user
+    case get_user(ID) of
+        null -> ets:insert(?USER_TABLE_NAME, #user{id = ID});
+        _ -> ok
+    end,
+    ets:insert(?PID_TABLE_NAME, {ID, PID}),
     ok.
+
 get_user(ID) ->
     get_value(?USER_TABLE_NAME, ID).
 
 follow_user(FollowerID, FollowingID) ->
+    % assuming current and following users exist
     [FollowerUser] = ets:lookup(?USER_TABLE_NAME, FollowerID),
-    #user{
-        following = Following
-    } = FollowerUser,
     ets:insert(?USER_TABLE_NAME, FollowerUser#user{
-        following = sets:add_element(FollowingID, Following)
+        following = sets:add_element(FollowingID, FollowerUser#user.following)
+    }),
+    [FollowedUser] = ets:lookup(?USER_TABLE_NAME, FollowingID),
+    ets:insert(?USER_TABLE_NAME, FollowedUser#user{
+        followers = sets:add_element(FollowerID, FollowedUser#user.followers)
     }),
     ok.
 
+get_followers(UserID) ->
+    #user{
+        followers = Followers
+    } = get_user(UserID),
+    sets:to_list(Followers).
+
 save_tweet(ID, PosterID, Content) ->
-    save_tweet(ID, undefined, tweet, PosterID, Content),
-    ok.
+    save_tweet(ID, undefined, tweet, PosterID, Content).
 save_tweet(ID, ParentId, Type, PosterID, Content) ->
     RegexOptions = [global, multiline, {capture, all, list}],
     case re:run(Content, "@(\\S+)", RegexOptions) of
@@ -120,26 +139,24 @@ save_tweet(ID, ParentId, Type, PosterID, Content) ->
         nomatch ->
             ok
     end,
-    ets:insert(?TWEET_TABLE_NAME, #tweet{
+    Tweet = #tweet{
         id = ID,
         parent_id = ParentId,
         type = Type,
         poster_id = PosterID,
         content = Content
-    }),
-    ok.
+    },
+    ets:insert(?TWEET_TABLE_NAME, Tweet),
+    Tweet.
 
 re_tweet(ID, RetweetID, PosterID) ->
-    save_tweet(ID, RetweetID, retweet, PosterID, undefined),
-    ok.
+    save_tweet(ID, RetweetID, re_tweet, PosterID, "").
 
 quote_tweet(ID, QuotedTweetID, PosterID, Quote) ->
-    save_tweet(ID, QuotedTweetID, quote, PosterID, Quote),
-    ok.
+    save_tweet(ID, QuotedTweetID, quote, PosterID, Quote).
 
 reply_tweet(ID, ReplyTweetID, PosterID, ReplyContent) ->
-    save_tweet(ID, ReplyTweetID, reply, PosterID, ReplyContent),
-    ok.
+    save_tweet(ID, ReplyTweetID, reply, PosterID, ReplyContent).
 
 like_tweet(TweetID, UserID) ->
     [Tweet] = ets:lookup(?TWEET_TABLE_NAME, TweetID),
@@ -201,3 +218,9 @@ query_tweets(Query) ->
 
 get_tweet(ID) ->
     get_value(?TWEET_TABLE_NAME, ID).
+get_retweet_content(TweetID) ->
+    Tweet = get_tweet(TweetID),
+    Tweet#tweet.content.
+
+get_user_pid(ID) ->
+    get_value(?PID_TABLE_NAME, ID).

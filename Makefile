@@ -3,8 +3,11 @@ CACHE_APP_NAME := cache
 TWEETER_SERVER_APP_NAME := tweeter
 TWEETER_CLIENT_SIMULATOR_APP_NAME := tweeter_client_simulator
 
-all: compile_tweeter_server compile_tweeter_client_simulator
-	
+all: compile_tweeter_server compile_tweeter_client_simulator compile_common
+
+compile_common: clean
+	erlc -pa ebin/ -o ebin/ src/common/*.erl
+
 compile_tweeter_server: clean
 	cp src/$(TWEETER_SERVER_APP_NAME).app ebin/
 	erlc -pa ebin/ -o ebin/ src/$(TWEETER_SERVER_APP_NAME)/*.erl
