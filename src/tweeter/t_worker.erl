@@ -13,7 +13,7 @@ register_account({PID, _}, UserID) ->
     PID ! {ok, register_account, UserID}.
 
 publish_tweet({PID, _}, UserID, Content) ->
-    TweetID = util:generate_string(),
+    TweetID = UserID ++ integer_to_list(util:get_utc_seconds()),
     t_store:save_tweet(TweetID, UserID, Content),
     PID ! {ok, publish_tweet, TweetID}.
 
@@ -22,7 +22,7 @@ follow_user({PID, _}, UserID, FollowUserID) ->
     PID ! {ok, follow_user}.
 
 re_tweet({PID, _}, UserID, TweetID) ->
-    RetweetID = util:generate_string(),
+    RetweetID = UserID ++ integer_to_list(util:get_utc_seconds()),
     t_store:re_tweet(RetweetID, TweetID, UserID),
     PID ! {ok, re_tweet, RetweetID}.
 

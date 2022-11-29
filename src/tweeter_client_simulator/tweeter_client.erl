@@ -1,7 +1,7 @@
--module(client).
+-module(tweeter_client).
 -behaviour(gen_server).
 
--export([start_link/0]).
+-export([start_link/1]).
 
 -export([
     init/1,
@@ -11,13 +11,13 @@
     terminate/2,
     code_change/3
 ]).
--record(state, {user_id = util:generate_string()}).
+-record(state, {user_id = 0}).
 
-start_link() ->
-    gen_server:start_link(?MODULE, [], []).
+start_link(UserID) ->
+    gen_server:start_link(?MODULE, [UserID], []).
 
-init([]) ->
-    State = #state{},
+init([UserID]) ->
+    State = #state{user_id = UserID},
     gen_server:call(tweeter, {register, State#state.user_id}),
     {ok, State}.
 
@@ -28,8 +28,8 @@ handle_call(Msg, _From, State) ->
 handle_cast(stop, State) ->
     {stop, normal, State}.
 
-handle_info({ok, register_account, _}, State) ->
-    io:format("account registered"),
+handle_info({ok, register_account, _}, #state{user_id = UserID} = State) ->
+    io:format("[~p] account registered~n", [UserID]),
     {noreply, State};
 handle_info(Msg, State) ->
     io:format("[~p] ~p~n", [self(), Msg]),
