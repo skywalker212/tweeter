@@ -39,8 +39,7 @@ query(PID, Query) ->
 notify_followers(UserID, Message) ->
     lists:foreach(
         fun(FollowerID) ->
-            {_, FollowerPID} = t_store:get_user_pid(FollowerID),
-            FollowerPID ! Message
+            t_store:get_user_pid(FollowerID) ! Message
         end,
         t_store:get_followers(UserID)
     ).

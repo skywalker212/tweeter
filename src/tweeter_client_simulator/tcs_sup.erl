@@ -15,7 +15,7 @@ init([N]) ->
             ID = integer_to_list(X),
             {
                 "tweeter_client" ++ ID,
-                {tweeter_client, start_link, [ID]},
+                {tweeter_client, start_link, [ID, N]},
                 transient,
                 brutal_kill,
                 worker,

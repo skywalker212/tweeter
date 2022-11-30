@@ -20,7 +20,8 @@
     get_user_tweets/1,
     get_user_tweets/2,
     query_tweets/1,
-    get_user_pid/1
+    get_user_pid/1,
+    total_pids/0
 ]).
 
 -define(USER_TABLE_NAME, user).
@@ -223,4 +224,8 @@ get_retweet_content(TweetID) ->
     Tweet#tweet.content.
 
 get_user_pid(ID) ->
-    get_value(?PID_TABLE_NAME, ID).
+    {_, PID} = get_value(?PID_TABLE_NAME, ID),
+    PID.
+
+total_pids() ->
+    ets:info(?PID_TABLE_NAME, size).

@@ -9,7 +9,7 @@ start(_StartType, _StartArgs) ->
         {ok, Pid} ->
             %% temporary line below TODO: remove it
             % start client simulator.
-            {ok, _} = tcs_sup:start_link(5),
+            {ok, _} = tcs_sup:start_link(10),
             {ok, Pid};
         Other ->
             {error, Other}
