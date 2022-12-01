@@ -19,6 +19,7 @@
     like_tweet/2,
     get_user_tweets/1,
     get_user_tweets/2,
+    get_last_tweet_id/0,
     query_tweets/1,
     get_user_pid/1,
     total_pids/0
@@ -198,12 +199,12 @@ query_tweets(Query) ->
         ])
     of
         {match, [_, _, Hashtag]} ->
-            get_tweets(?HASHTAG_TABLE_NAME, Hashtag);
+            Tweets = get_tweets(?HASHTAG_TABLE_NAME, Hashtag);
         {match, [_, _, _, _, MentionID]} ->
-            get_tweets(?MENTION_TABLE_NAME, MentionID);
+            Tweets = get_tweets(?MENTION_TABLE_NAME, MentionID);
         {match, [_, _, _, _, _, QueryString]} ->
             %% no choice but to iterate through all the tweets and get the tweets with the given string since we dont have an index on tweet content
-            ets:foldl(
+            Tweets = ets:foldl(
                 fun(Tweet, List) ->
                     case string:str(Tweet#tweet.content, QueryString) of
                         0 -> List;
@@ -214,14 +215,20 @@ query_tweets(Query) ->
                 ?TWEET_TABLE_NAME
             );
         nomatch ->
-            []
-    end.
+            Tweets = []
+    end,
+    lists:map(fun(Tweet) -> {Tweet#tweet.poster_id, Tweet#tweet.content} end, Tweets).
 
 get_tweet(ID) ->
     get_value(?TWEET_TABLE_NAME, ID).
 get_retweet_content(TweetID) ->
     Tweet = get_tweet(TweetID),
-    Tweet#tweet.content.
+    (Tweet#tweet.content).
+get_last_tweet_id() ->
+    case ets:last(?TWEET_TABLE_NAME) of
+        '$end_of_table' -> null;
+        Key -> Key
+    end.
 
 get_user_pid(ID) ->
     {_, PID} = get_value(?PID_TABLE_NAME, ID),

@@ -8,7 +8,7 @@
     tweet/2,
     re_tweet/2,
     user_mentions/1,
-    query/1
+    query/2
 ]).
 
 -export([
@@ -24,18 +24,36 @@
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 register_user(UserID) ->
+    Now = util:get_utc_seconds(),
+    RequestID = UserID ++ integer_to_list(Now),
     % assuming the client would be calling these functions so using self() pid
-    gen_server:cast(?MODULE, {self(), register, UserID}).
+    gen_server:cast(?MODULE, {self(), RequestID, register, UserID}),
+    {RequestID, Now}.
 follow_user(UserID, FollowerID) ->
-    gen_server:cast(?MODULE, {self(), follow, UserID, FollowerID}).
+    Now = util:get_utc_seconds(),
+    RequestID = UserID ++ integer_to_list(Now),
+    gen_server:cast(?MODULE, {self(), RequestID, follow, UserID, FollowerID}),
+    {RequestID, Now}.
 tweet(UserID, Content) ->
-    gen_server:cast(?MODULE, {self(), tweet, UserID, Content}).
+    Now = util:get_utc_seconds(),
+    RequestID = UserID ++ integer_to_list(Now),
+    gen_server:cast(?MODULE, {self(), RequestID, tweet, UserID, Content}),
+    {RequestID, Now}.
 re_tweet(UserID, TweetID) ->
-    gen_server:cast(?MODULE, {self(), re_tweet, UserID, TweetID}).
+    Now = util:get_utc_seconds(),
+    RequestID = UserID ++ integer_to_list(Now),
+    gen_server:cast(?MODULE, {self(), RequestID, re_tweet, UserID, TweetID}),
+    {RequestID, Now}.
 user_mentions(UserID) ->
-    gen_server:cast(?MODULE, {self(), mentions, UserID}).
-query(Query) ->
-    gen_server:cast(?MODULE, {self(), query, Query}).
+    Now = util:get_utc_seconds(),
+    RequestID = UserID ++ integer_to_list(Now),
+    gen_server:cast(?MODULE, {self(), RequestID, mentions, UserID}),
+    {RequestID, Now}.
+query(UserID, Query) ->
+    Now = util:get_utc_seconds(),
+    RequestID = UserID ++ integer_to_list(Now),
+    gen_server:cast(?MODULE, {self(), RequestID, query, Query}),
+    {RequestID, Now}.
 
 %% gen server impelemtation
 init([]) ->
@@ -46,23 +64,24 @@ handle_call(_Message, _From, _State) ->
     ok.
 
 %% asynchronously fork another process to reply to the request
-handle_cast({PID, register, UserID}, State) ->
-    spawn(t_worker, register_account, [PID, UserID]),
+%% RequestID is used on client side to measure the time taken to finish the request by the server
+handle_cast({PID, RequestID, register, UserID}, State) ->
+    spawn(t_worker, register_account, [PID, RequestID, UserID]),
     {noreply, State};
-handle_cast({PID, tweet, UserID, TweetContent}, State) ->
-    spawn(t_worker, publish_tweet, [PID, UserID, TweetContent]),
+handle_cast({PID, RequestID, tweet, UserID, TweetContent}, State) ->
+    spawn(t_worker, publish_tweet, [PID, RequestID, UserID, TweetContent]),
     {noreply, State};
-handle_cast({PID, follow, UserID, FollowerID}, State) ->
-    spawn(t_worker, follow_user, [PID, UserID, FollowerID]),
+handle_cast({PID, RequestID, follow, UserID, FollowerID}, State) ->
+    spawn(t_worker, follow_user, [PID, RequestID, UserID, FollowerID]),
     {noreply, State};
-handle_cast({PID, re_tweet, UserID, TweetID}, State) ->
-    spawn(t_worker, re_tweet, [PID, UserID, TweetID]),
+handle_cast({PID, RequestID, re_tweet, UserID, TweetID}, State) ->
+    spawn(t_worker, re_tweet, [PID, RequestID, UserID, TweetID]),
     {noreply, State};
-handle_cast({PID, mentions, UserID}, State) ->
-    spawn(t_worker, mentions, [PID, UserID]),
+handle_cast({PID, RequestID, mentions, UserID}, State) ->
+    spawn(t_worker, mentions, [PID, RequestID, UserID]),
     {noreply, State};
-handle_cast({PID, query, Query}, State) ->
-    spawn(t_worker, query, [PID, Query]),
+handle_cast({PID, RequestID, query, Query}, State) ->
+    spawn(t_worker, query, [PID, RequestID, Query]),
     {noreply, State};
 handle_cast(stop, State) ->
     {stop, normal, State}.

@@ -7,6 +7,8 @@
 -define(SERVER, ?MODULE).
 
 start_link(N) ->
+    % store words to be used in tweets in an ETS table
+    generator:save_words(),
     supervisor:start_link({local, ?SERVER}, ?MODULE, [N]).
 
 init([N]) ->

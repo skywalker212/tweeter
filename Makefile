@@ -2,19 +2,20 @@ APP_NAME := tweeter
 CACHE_APP_NAME := cache
 TWEETER_SERVER_APP_NAME := tweeter
 TWEETER_CLIENT_SIMULATOR_APP_NAME := tweeter_client_simulator
+COMPILER_OPTIONS := "-pa ebin/ -o ebin/"
 
 all: compile_tweeter_server compile_tweeter_client_simulator compile_common
 
 compile_common: clean
-	erlc -pa ebin/ -o ebin/ src/common/*.erl
+	erlc $(COMPILER_OPTIONS) src/common/*.erl
 
 compile_tweeter_server: clean
 	cp src/$(TWEETER_SERVER_APP_NAME).app ebin/
-	erlc -pa ebin/ -o ebin/ src/$(TWEETER_SERVER_APP_NAME)/*.erl
+	erlc $(COMPILER_OPTIONS) src/$(TWEETER_SERVER_APP_NAME)/*.erl
 
 compile_tweeter_client_simulator: clean
 	cp src/$(TWEETER_CLIENT_SIMULATOR_APP_NAME).app ebin/
-	erlc -pa ebin/ -o ebin/ src/${TWEETER_CLIENT_SIMULATOR_APP_NAME}/*.erl
+	erlc $(COMPILER_OPTIONS) src/${TWEETER_CLIENT_SIMULATOR_APP_NAME}/*.erl
 
 run:
 	erl -pa ebin/
