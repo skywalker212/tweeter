@@ -88,7 +88,12 @@ handle_cast(
     end,
     % schedule next tweet
     schedule_tweet(),
-    {noreply, State#state{pending_requests = PendingRequests ++ Request}};
+    case rand:uniform(100) of
+        1 ->
+            {stop, normal, State#state{pending_requests = PendingRequests ++ Request}};
+        _ ->
+            {noreply, State#state{pending_requests = PendingRequests ++ Request}}
+    end;
 handle_cast(
     {tweet, TweetContent}, #state{user_id = UserID, pending_requests = PendingRequests} = State
 ) ->
@@ -216,13 +221,18 @@ handle_info(timeout, #state{n = N, user_id = UserID, followers = Followers} = St
     end.
 
 terminate(
-    _Reason, #state{user_id = UserID, start_time = StartTime, request_times = RequestTimes} = State
+    Reason, #state{user_id = UserID, start_time = StartTime, request_times = RequestTimes} = State
 ) ->
     RequestTimesDict = lists:foldr(
         fun({K, V}, D) -> dict:append(K, V, D) end, dict:new(), RequestTimes
     ),
-    gen_server:cast(main, {terminate, UserID, StartTime, RequestTimesDict}),
-    {stop, normal, State}.
+    TerminationReason =
+        case Reason of
+            normal -> disconnect;
+            Other -> Other
+        end,
+    gen_server:cast(main, {TerminationReason, UserID, StartTime, RequestTimesDict}),
+    {stop, Reason, State}.
 code_change(_OldVsn, _State, _Extra) ->
     ok.
 

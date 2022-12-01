@@ -20,11 +20,10 @@ init([N]) ->
             ID = integer_to_list(X),
             #{
                 id => "client" ++ ID,
-                start => {client, start_link, [ID, N]},
-                restart => transient
+                start => {client, start_link, [ID, N]}
             }
         end,
         lists:seq(1, N)
     ),
-    RestartStrategy = #{},
+    RestartStrategy = #{intensity => N},
     {ok, {RestartStrategy, Children}}.

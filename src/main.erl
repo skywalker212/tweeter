@@ -29,7 +29,6 @@
 
 -record(state, {
     request_times = dict:new(),
-    run_time = infinity,
     total_clients = ?DEFAULT_NO_OF_CLIENTS,
     terminated_clients = []
 }).
@@ -51,13 +50,24 @@ init([NoOfClients, RunTime]) ->
     io:format("Started client simulator with ~B clients, simulator will stop after ~B seconds~n", [
         NoOfClients, erlang:convert_time_unit(RunTime, millisecond, second)
     ]),
-    {ok, #state{run_time = RunTime, total_clients = NoOfClients}, RunTime}.
+    erlang:send_after(RunTime, self(), {'$gen_cast', stop}),
+    {ok, #state{total_clients = NoOfClients}}.
 
-handle_call(_Msg, _From, #state{run_time = RunTime} = State) ->
-    {noreply, State, RunTime}.
+handle_call(_Msg, _From, State) ->
+    {noreply, State}.
 
 handle_cast(
-    {terminate, UserID, _StartTime, IncomingRequestTimesDict},
+    {disconnect, _UserID, _StartTime, IncomingRequestTimesDict},
+    #state{
+        request_times = RequestTimesDict
+    } = State
+) ->
+    UpdatedRequestTimesDict = dict:merge(
+        fun(_, List1, List2) -> List1 ++ List2 end, IncomingRequestTimesDict, RequestTimesDict
+    ),
+    {noreply, State#state{request_times = UpdatedRequestTimesDict}};
+handle_cast(
+    {shutdown, UserID, _StartTime, IncomingRequestTimesDict},
     #state{
         request_times = RequestTimesDict,
         total_clients = TotalClients,
@@ -87,12 +97,14 @@ handle_cast(
                 request_times = UpdatedRequestTimesDict,
                 terminated_clients = [UserID | TerminatedClients]
             }}
-    end.
-
-handle_info(timeout, State) ->
+    end;
+handle_cast(stop, State) ->
     io:format("~n~nEnding simulation, sending signal to stop client and server app...~n~n"),
     application:stop(?CLIENT_APP_NAME),
     application:stop(?SERVER_APP_NAME),
+    {noreply, State}.
+
+handle_info(timeout, State) ->
     {noreply, State}.
 
 terminate(_Reason, State) ->
