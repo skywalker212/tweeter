@@ -30,7 +30,7 @@
     total_followers = 0,
     followers = [],
     user_id,
-    start_time = util:get_timestamp(),
+    start_time = erlang:system_time(),
     pending_requests = [],
     request_times = []
 }).
@@ -215,12 +215,13 @@ handle_info(timeout, #state{n = N, user_id = UserID, followers = Followers} = St
             {noreply, State, ?START_TIME}
     end.
 
-terminate(_Reason, #state{user_id = UserID, request_times = RequestTimes} = State) ->
-    RequestTimesDict = dict:map(
-        fun(_, V) -> lists:sum(V) / length(V) end,
-        lists:foldr(fun({K, V}, D) -> dict:append(K, V, D) end, dict:new(), RequestTimes)
+terminate(
+    _Reason, #state{user_id = UserID, start_time = StartTime, request_times = RequestTimes} = State
+) ->
+    RequestTimesDict = lists:foldr(
+        fun({K, V}, D) -> dict:append(K, V, D) end, dict:new(), RequestTimes
     ),
-    io:format("[~p] terminating ~p~n", [UserID, RequestTimesDict]),
+    gen_server:cast(main, {terminate, UserID, StartTime, RequestTimesDict}),
     {stop, normal, State}.
 code_change(_OldVsn, _State, _Extra) ->
     ok.
@@ -248,7 +249,7 @@ update_request_times(Operation, RequestID, RequestTimes, PendingRequests) ->
             {RequestTimes, PendingRequests};
         {value, {_, StartTime}, UpdatedPendingRequests} ->
             {
-                [{Operation, util:get_timestamp() - StartTime} | RequestTimes],
+                [{Operation, erlang:system_time(nanosecond) - StartTime} | RequestTimes],
                 UpdatedPendingRequests
             }
     end.

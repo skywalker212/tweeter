@@ -7,6 +7,7 @@ COMPILER_OPTIONS := -pa ebin/ -o ebin/ -DPROD
 all: compile_tweeter_server compile_tweeter_client_simulator compile_common
 
 compile_common: clean
+	erlc $(COMPILER_OPTIONS) src/*.erl
 	erlc $(COMPILER_OPTIONS) src/common/*.erl
 
 compile_tweeter_server: clean

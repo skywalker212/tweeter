@@ -5,6 +5,6 @@
         {modules, [c_app, c_sup, client]},
         {registered, [client]},
         {applications, [kernel, stdlib]},
-        {mod, {c_app, [10]}}
+        {mod, {c_app, []}}
     ]
 }.

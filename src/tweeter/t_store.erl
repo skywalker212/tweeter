@@ -100,6 +100,14 @@ get_followers(UserID) ->
 save_tweet(ID, PosterID, Content) ->
     save_tweet(ID, undefined, tweet, PosterID, Content).
 save_tweet(ID, ParentId, Type, PosterID, Content) ->
+    Tweet = #tweet{
+        id = ID,
+        parent_id = ParentId,
+        type = Type,
+        poster_id = PosterID,
+        content = Content
+    },
+    ets:insert(?TWEET_TABLE_NAME, Tweet),
     RegexOptions = [global, multiline, {capture, all, list}],
     case re:run(Content, "@(\\S+)", RegexOptions) of
         {match, MentionList} ->
@@ -141,14 +149,6 @@ save_tweet(ID, ParentId, Type, PosterID, Content) ->
         nomatch ->
             ok
     end,
-    Tweet = #tweet{
-        id = ID,
-        parent_id = ParentId,
-        type = Type,
-        poster_id = PosterID,
-        content = Content
-    },
-    ets:insert(?TWEET_TABLE_NAME, Tweet),
     Tweet.
 
 re_tweet(ID, RetweetID, PosterID) ->
