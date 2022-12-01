@@ -1,8 +1,8 @@
 APP_NAME := tweeter
 CACHE_APP_NAME := cache
 TWEETER_SERVER_APP_NAME := tweeter
-TWEETER_CLIENT_SIMULATOR_APP_NAME := tweeter_client_simulator
-COMPILER_OPTIONS := "-pa ebin/ -o ebin/"
+TWEETER_CLIENT_SIMULATOR_APP_NAME := client
+COMPILER_OPTIONS := -pa ebin/ -o ebin/ -DPROD
 
 all: compile_tweeter_server compile_tweeter_client_simulator compile_common
 

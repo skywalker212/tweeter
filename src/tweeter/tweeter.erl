@@ -24,33 +24,33 @@
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 register_user(UserID) ->
-    Now = util:get_utc_seconds(),
+    Now = util:get_timestamp(),
     RequestID = UserID ++ integer_to_list(Now),
     % assuming the client would be calling these functions so using self() pid
     gen_server:cast(?MODULE, {self(), RequestID, register, UserID}),
     {RequestID, Now}.
 follow_user(UserID, FollowerID) ->
-    Now = util:get_utc_seconds(),
+    Now = util:get_timestamp(),
     RequestID = UserID ++ integer_to_list(Now),
     gen_server:cast(?MODULE, {self(), RequestID, follow, UserID, FollowerID}),
     {RequestID, Now}.
 tweet(UserID, Content) ->
-    Now = util:get_utc_seconds(),
+    Now = util:get_timestamp(),
     RequestID = UserID ++ integer_to_list(Now),
     gen_server:cast(?MODULE, {self(), RequestID, tweet, UserID, Content}),
     {RequestID, Now}.
 re_tweet(UserID, TweetID) ->
-    Now = util:get_utc_seconds(),
+    Now = util:get_timestamp(),
     RequestID = UserID ++ integer_to_list(Now),
     gen_server:cast(?MODULE, {self(), RequestID, re_tweet, UserID, TweetID}),
     {RequestID, Now}.
 user_mentions(UserID) ->
-    Now = util:get_utc_seconds(),
+    Now = util:get_timestamp(),
     RequestID = UserID ++ integer_to_list(Now),
     gen_server:cast(?MODULE, {self(), RequestID, mentions, UserID}),
     {RequestID, Now}.
 query(UserID, Query) ->
-    Now = util:get_utc_seconds(),
+    Now = util:get_timestamp(),
     RequestID = UserID ++ integer_to_list(Now),
     gen_server:cast(?MODULE, {self(), RequestID, query, Query}),
     {RequestID, Now}.

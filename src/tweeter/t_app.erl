@@ -7,9 +7,6 @@ start(_StartType, _StartArgs) ->
     % start server
     case tweeter:start_link() of
         {ok, Pid} ->
-            %% temporary line below TODO: remove it
-            % start client simulator.
-            {ok, _} = tcs_sup:start_link(10),
             {ok, Pid};
         Other ->
             {error, Other}

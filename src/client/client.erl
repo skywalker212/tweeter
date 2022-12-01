@@ -1,4 +1,4 @@
--module(tweeter_client).
+-module(client).
 -behaviour(gen_server).
 
 -export([start_link/2]).
@@ -30,7 +30,7 @@
     total_followers = 0,
     followers = [],
     user_id,
-    start_time = util:get_utc_seconds(),
+    start_time = util:get_timestamp(),
     pending_requests = [],
     request_times = []
 }).
@@ -41,6 +41,7 @@ start_link(UserID, N) ->
 
 %% GEN SERVER IMPLEMENTATION
 init([UserID, N]) ->
+    process_flag(trap_exit, true),
     IntID = list_to_integer(UserID),
     RegisterRequest = tweeter:register_user(UserID),
     State = #state{
@@ -114,9 +115,7 @@ handle_cast({mentions}, #state{user_id = UserID, pending_requests = PendingReque
     {noreply, State#state{pending_requests = [MentionRequest | PendingRequests]}};
 handle_cast({query, Query}, #state{user_id = UserID, pending_requests = PendingRequests} = State) ->
     QueryRequest = tweeter:query(UserID, Query),
-    {noreply, State#state{pending_requests = [QueryRequest | PendingRequests]}};
-handle_cast(stop, State) ->
-    {stop, normal, State}.
+    {noreply, State#state{pending_requests = [QueryRequest | PendingRequests]}}.
 
 %% Incoming tweets
 handle_info(
@@ -139,7 +138,7 @@ handle_info(
     {UpdatedRequestTimes, UpdatedPendingRequests} = update_request_times(
         register_account, RequestID, RequestTimes, PendingRequests
     ),
-    % ?PRINT("[~s, ~s] registered successfully~n", [UserID, RequestID]),
+    ?PRINT("[~s, ~s] registered successfully~n", [UserID, RequestID]),
     IntID = list_to_integer(UserID),
     Followers = generate_follow_users(
         TotalFollowers, lists:delete(IntID, lists:seq(1, N)), []
@@ -153,46 +152,46 @@ handle_info(
         },
         ?START_TIME};
 handle_info(
-    {ok, RequestID, follow_user, _FollowUserID},
-    #state{user_id = _UserID, request_times = RequestTimes, pending_requests = PendingRequests} =
+    {ok, RequestID, follow_user, FollowUserID},
+    #state{user_id = UserID, request_times = RequestTimes, pending_requests = PendingRequests} =
         State
 ) ->
     {UpdatedRequestTimes, UpdatedPendingRequests} = update_request_times(
-        register_account, RequestID, RequestTimes, PendingRequests
+        follow_user, RequestID, RequestTimes, PendingRequests
     ),
-    % ?PRINT("[~s, ~s] Followed ~s~n", [UserID, RequestID, FollowUserID]),
+    ?PRINT("[~s, ~s] Followed ~s~n", [UserID, RequestID, FollowUserID]),
     {noreply, State#state{
         request_times = UpdatedRequestTimes, pending_requests = UpdatedPendingRequests
     }};
 handle_info(
-    {ok, RequestID, publish_tweet, _TweetID, _TweetType},
-    #state{user_id = _UserID, request_times = RequestTimes, pending_requests = PendingRequests} =
+    {ok, RequestID, publish_tweet, TweetID, TweetType},
+    #state{user_id = UserID, request_times = RequestTimes, pending_requests = PendingRequests} =
         State
 ) ->
     {UpdatedRequestTimes, UpdatedPendingRequests} = update_request_times(
-        register_account, RequestID, RequestTimes, PendingRequests
+        publish_tweet, RequestID, RequestTimes, PendingRequests
     ),
-    % ?PRINT("[~s, ~s] ~p published with ID ~s~n", [UserID, RequestID, TweetType, TweetID]),
+    ?PRINT("[~s, ~s] ~p published with ID ~s~n", [UserID, RequestID, TweetType, TweetID]),
     {noreply, State#state{
         request_times = UpdatedRequestTimes, pending_requests = UpdatedPendingRequests
     }};
 handle_info(
-    {ok, RequestID, result, _Query, _QueryResult},
-    #state{user_id = _UserID, request_times = RequestTimes, pending_requests = PendingRequests} =
+    {ok, RequestID, result, Query, QueryResult},
+    #state{user_id = UserID, request_times = RequestTimes, pending_requests = PendingRequests} =
         State
 ) ->
     {UpdatedRequestTimes, UpdatedPendingRequests} = update_request_times(
-        register_account, RequestID, RequestTimes, PendingRequests
+        query, RequestID, RequestTimes, PendingRequests
     ),
-    % ?PRINT("[~s, ~s] Query ~s result ~s~n", [
-    %     UserID,
-    %     RequestID,
-    %     Query,
-    %     lists:map(
-    %         fun({PosterID, Content}) -> " {[" ++ PosterID ++ "]: " ++ Content ++ "} " end,
-    %         QueryResult
-    %     )
-    % ]),
+    ?PRINT("[~s, ~s] Query ~s result ~s~n", [
+        UserID,
+        RequestID,
+        Query,
+        lists:map(
+            fun({PosterID, Content}) -> " {[" ++ PosterID ++ "]: " ++ Content ++ "} " end,
+            QueryResult
+        )
+    ]),
     {noreply, State#state{
         request_times = UpdatedRequestTimes, pending_requests = UpdatedPendingRequests
     }};
@@ -216,9 +215,13 @@ handle_info(timeout, #state{n = N, user_id = UserID, followers = Followers} = St
             {noreply, State, ?START_TIME}
     end.
 
-terminate(_Reason, #state{user_id = UserID}) ->
-    io:format("[~p] terminating~n", [UserID]),
-    ok.
+terminate(_Reason, #state{user_id = UserID, request_times = RequestTimes} = State) ->
+    RequestTimesDict = dict:map(
+        fun(_, V) -> lists:sum(V) / length(V) end,
+        lists:foldr(fun({K, V}, D) -> dict:append(K, V, D) end, dict:new(), RequestTimes)
+    ),
+    io:format("[~p] terminating ~p~n", [UserID, RequestTimesDict]),
+    {stop, normal, State}.
 code_change(_OldVsn, _State, _Extra) ->
     ok.
 
@@ -244,5 +247,8 @@ update_request_times(Operation, RequestID, RequestTimes, PendingRequests) ->
         false ->
             {RequestTimes, PendingRequests};
         {value, {_, StartTime}, UpdatedPendingRequests} ->
-            {[{Operation, util:get_utc_seconds() - StartTime} | Operation], UpdatedPendingRequests}
+            {
+                [{Operation, util:get_timestamp() - StartTime} | RequestTimes],
+                UpdatedPendingRequests
+            }
     end.
