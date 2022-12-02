@@ -87,7 +87,7 @@ handle_cast(
             ),
             io:format("----------------- Average Operation Times ------------------~n"),
             lists:foreach(
-                fun({K, V}) -> io:format("~-20s~-10B nanoseconds~n", [K, trunc(V)]) end,
+                fun({K, V}) -> io:format("~-20s~-15B nanoseconds~n", [K, trunc(V)]) end,
                 AverageTimes
             ),
             io:format("------------------------------------------------------------~n"),

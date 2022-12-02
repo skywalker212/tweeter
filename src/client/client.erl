@@ -15,9 +15,9 @@
 %% startup time in miliseconds to wait other clients to register themselves before performing actions
 -define(START_TIME, 500).
 %% Interval at which to publish tweet/retweet
--define(TWEET_INTERVAL, 1000).
+-define(TWEET_INTERVAL, 100).
 %% Interval at which to query
--define(QUERY_INTERVAL, 2000).
+-define(QUERY_INTERVAL, 500).
 
 -ifdef(PROD).
 -define(PRINT(S, A), ok).
@@ -88,7 +88,7 @@ handle_cast(
     end,
     % schedule next tweet
     schedule_tweet(),
-    case rand:uniform(100) of
+    case rand:uniform(1000) of
         1 ->
             {stop, normal, State#state{pending_requests = PendingRequests ++ Request}};
         _ ->
@@ -144,6 +144,7 @@ handle_info(
         register_account, RequestID, RequestTimes, PendingRequests
     ),
     ?PRINT("[~s, ~s] registered successfully~n", [UserID, RequestID]),
+    % TODO: Don't do this for reconnecting client, do this only for newly registered clients
     IntID = list_to_integer(UserID),
     Followers = generate_follow_users(
         TotalFollowers, lists:delete(IntID, lists:seq(1, N)), []
