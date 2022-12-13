@@ -1,15 +1,16 @@
-{application, client,
- [{description, "Client simulator for tweeter"},
-  {vsn, "0.1.0"},
-  {registered, []},
-  {mod, {client_app, [10]}},
-  {applications,
-   [kernel,
-    stdlib
-   ]},
-  {env,[]},
-  {modules, []},
+{application, client, [
+    {description, "Client simulator for tweeter"},
+    {vsn, "0.1.0"},
+    {registered, []},
+    {mod, {client_app, [10]}},
+    {applications, [
+        kernel,
+        stdlib,
+        server
+    ]},
+    {env, []},
+    {modules, [client_app, client_sup, client, generator]},
 
-  {licenses, ["Apache-2.0"]},
-  {links, []}
- ]}.
+    {licenses, ["Apache-2.0"]},
+    {links, []}
+]}.

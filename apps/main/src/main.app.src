@@ -1,15 +1,15 @@
-{application, main,
- [{description, "Root application to start client and server"},
-  {vsn, "0.1.0"},
-  {registered, []},
-  {mod, {main_app, []}},
-  {applications,
-   [kernel,
-    stdlib
-   ]},
-  {env,[]},
-  {modules, []},
+{application, main, [
+    {description, "Root application to start client and server"},
+    {vsn, "0.1.0"},
+    {registered, [main]},
+    {mod, {main_app, []}},
+    {applications, [
+        kernel,
+        stdlib
+    ]},
+    {env, []},
+    {modules, [main_app, main]},
 
-  {licenses, ["Apache-2.0"]},
-  {links, []}
- ]}.
+    {licenses, ["Apache-2.0"]},
+    {links, []}
+]}.

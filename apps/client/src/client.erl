@@ -19,7 +19,7 @@
 %% Interval at which to query
 -define(QUERY_INTERVAL, 500).
 
--ifdef(PROD).
+-ifdef(prod).
 -define(PRINT(S, A), ok).
 -else.
 -define(PRINT(S, A), io:format(S, A)).
@@ -88,12 +88,7 @@ handle_cast(
     end,
     % schedule next tweet
     schedule_tweet(),
-    % case rand:uniform(1000) of
-    %     1 ->
-    %         {stop, normal, State#state{pending_requests = PendingRequests ++ Request}};
-    %     _ ->
-            {noreply, State#state{pending_requests = PendingRequests ++ Request}};
-    % end;
+    {noreply, State#state{pending_requests = PendingRequests ++ Request}};
 handle_cast(
     {tweet, TweetContent}, #state{user_id = UserID, pending_requests = PendingRequests} = State
 ) ->

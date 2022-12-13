@@ -23,7 +23,7 @@
 
 -define(DEFAULT_NO_OF_CLIENTS, 10).
 
--define(SERVER_APP_NAME, tweeter).
+-define(SERVER_APP_NAME, server).
 
 -define(CLIENT_APP_NAME, client).
 
