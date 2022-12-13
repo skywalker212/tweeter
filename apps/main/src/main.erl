@@ -39,7 +39,6 @@ start() ->
 start(NoOfClients) ->
     start(NoOfClients, ?DEFAULT_RUN_TIME).
 start(NoOfClients, RunTime) ->
-    application:set_env(?CLIENT_APP_NAME, total_clients, NoOfClients),
     gen_server:start_link({local, ?SERVER}, ?MODULE, [NoOfClients, RunTime], []).
 
 %% GEN SERVER IMPLEMENTATION

@@ -76,7 +76,7 @@ handle_cast(
             case rand:uniform(4) of
                 4 ->
                     % retweet the last tweet, may happen that we retweet someone's retweet but it's fine for our simulation purposes
-                    case t_store:get_last_tweet_id() of
+                    case store:get_last_tweet_id() of
                         null -> Request = [];
                         ID -> Request = [tweeter:re_tweet(UserID, ID)]
                     end;
@@ -88,12 +88,12 @@ handle_cast(
     end,
     % schedule next tweet
     schedule_tweet(),
-    case rand:uniform(1000) of
-        1 ->
-            {stop, normal, State#state{pending_requests = PendingRequests ++ Request}};
-        _ ->
-            {noreply, State#state{pending_requests = PendingRequests ++ Request}}
-    end;
+    % case rand:uniform(1000) of
+    %     1 ->
+    %         {stop, normal, State#state{pending_requests = PendingRequests ++ Request}};
+    %     _ ->
+            {noreply, State#state{pending_requests = PendingRequests ++ Request}};
+    % end;
 handle_cast(
     {tweet, TweetContent}, #state{user_id = UserID, pending_requests = PendingRequests} = State
 ) ->
@@ -203,13 +203,13 @@ handle_info(
     }};
 %% handle initial cooldown timeout before starting the simulation
 handle_info(timeout, #state{n = N, user_id = UserID, followers = Followers} = State) ->
-    case t_store:total_pids() of
+    case store:total_pids() of
         N ->
             lists:foreach(
                 fun(Follower) ->
                     % Make the Follower follow the current user
                     gen_server:cast(
-                        t_store:get_user_pid(integer_to_list(Follower)), {follow, UserID}
+                        store:get_user_pid(integer_to_list(Follower)), {follow, UserID}
                     )
                 end,
                 Followers

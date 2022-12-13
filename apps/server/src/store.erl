@@ -1,4 +1,4 @@
--module(t_store).
+-module(store).
 -export([
     init/0
 ]).
