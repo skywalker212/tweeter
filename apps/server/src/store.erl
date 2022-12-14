@@ -1,6 +1,7 @@
 -module(store).
 -export([
-    init/0
+    init/0,
+    cleanup/0
 ]).
 
 %% API
@@ -21,8 +22,7 @@
     get_user_tweets/2,
     get_last_tweet_id/0,
     query_tweets/1,
-    get_handler_pid_from_user_id/1,
-    total_pids/0
+    get_handler_pid_from_user_id/1
 ]).
 
 -define(USER_TABLE_NAME, user).
@@ -30,7 +30,6 @@
 -define(MENTION_TABLE_NAME, mention).
 -define(HASHTAG_TABLE_NAME, hashtag).
 -define(PID_TABLE_NAME, pid).
--define(REVERSE_PID_TABLE_NAME, reverse_pid).
 
 -record(user, {
     id,
@@ -60,8 +59,14 @@ init() ->
     ets:new(?MENTION_TABLE_NAME, TableOptions),
     ets:new(?HASHTAG_TABLE_NAME, TableOptions),
     ets:new(?PID_TABLE_NAME, TableOptions),
-    ets:new(?REVERSE_PID_TABLE_NAME, TableOptions),
     ok.
+
+cleanup() ->
+    ets:delete(?USER_TABLE_NAME),
+    ets:delete(?TWEET_TABLE_NAME),
+    ets:delete(?MENTION_TABLE_NAME),
+    ets:delete(?HASHTAG_TABLE_NAME),
+    ets:delete(?PID_TABLE_NAME).
 
 get_value(TableName, TableKey) ->
     case ets:lookup(TableName, TableKey) of
@@ -71,13 +76,15 @@ get_value(TableName, TableKey) ->
 
 save_user(ID, PID) ->
     %% dont overwrite existing user
-    case get_user(ID) of
-        null -> ets:insert(?USER_TABLE_NAME, #user{id = ID});
-        _ -> ok
+    NewUser = case get_user(ID) of
+        null -> 
+            ets:insert(?USER_TABLE_NAME, #user{id = ID}),
+            true;
+        _ -> 
+            false
     end,
     ets:insert(?PID_TABLE_NAME, {ID, PID}),
-    ets:insert(?REVERSE_PID_TABLE_NAME, {PID, ID}),
-    ok.
+    NewUser.
 
 get_user(ID) ->
     get_value(?USER_TABLE_NAME, ID).
@@ -236,6 +243,3 @@ get_last_tweet_id() ->
 get_handler_pid_from_user_id(ID) ->
     {_, PID} = get_value(?PID_TABLE_NAME, ID),
     PID.
-
-total_pids() ->
-    ets:info(?PID_TABLE_NAME, size).

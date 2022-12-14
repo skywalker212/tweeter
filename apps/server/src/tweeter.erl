@@ -50,21 +50,21 @@ init(Req, _State) ->
     {cowboy_websocket, Req, #state{}}.
 
 websocket_init(State) ->
-    {[{text, <<"Web socket connection acknowledged!">>}], State}.
+    {[{text, "ack"}], State}.
 
 websocket_handle({text, SerializedJSON}, #state{user_id = UserID} = State) ->
     RequestMap = util:decode_json(SerializedJSON),
     case RequestMap of
         #{<<"request_id">> := RequestID, <<"register">> := Data} ->
             #{<<"user_id">> := ID} = Data,
-            store:save_user(ID, self()),
-            {[{text, util:encode_json(#{request_id => RequestID, success => #{register => ID}})}], State#state{user_id = ID}};
+            NewUser = store:save_user(ID, self()),
+            {[{text, util:encode_json(#{request_id => RequestID, success => #{register => NewUser}})}], State#state{user_id = ID}};
         #{<<"request_id">> := RequestID, <<"tweet">> := Data} ->
-            #{<<"tweet">> := TweetContent} = Data,
+            #{<<"content">> := TweetContent} = Data,
             TweetID = UserID ++ integer_to_list(util:get_utc_seconds()),
             store:save_tweet(TweetID, UserID, TweetContent),
             notify_followers(UserID, {tweet, tweet, {UserID, TweetContent}}),
-            {[{text, util:encode_json(#{request_id => RequestID, success => #{tweet => TweetID}})}], State};
+            {[{text, util:encode_json(#{request_id => RequestID, success => #{tweet => #{type => tweet, id => TweetID}}})}], State};
         #{<<"request_id">> := RequestID, <<"follow">> := Data} ->
             #{<<"follow_id">> := FollowID} = Data,
             store:follow_user(UserID, FollowID),
@@ -75,11 +75,10 @@ websocket_handle({text, SerializedJSON}, #state{user_id = UserID} = State) ->
             store:re_tweet(RetweetID, TweetID, UserID),
             Content = store:get_retweet_content(TweetID),
             notify_followers(UserID, {tweet, re_tweet, {UserID, Content}}),
-            {[{text, util:encode_json(#{request_id => RequestID, success => #{re_tweet => RetweetID}})}], State};
+            {[{text, util:encode_json(#{request_id => RequestID, success => #{tweet => #{type => re_tweet, id => RetweetID}}})}], State};
         #{<<"request_id">> := RequestID, <<"mentions">> := _Data} ->
             query(RequestID, "@" ++ UserID, State);
-        #{<<"request_id">> := RequestID, <<"query">> := Data} ->
-            #{<<"query">> := Query} = Data,
+        #{<<"request_id">> := RequestID, <<"query">> := Query} ->
             query(RequestID, Query, State);
         _ ->
             {[{text, util:encode_json(#{error => <<"Unknown Request">>})}], State}
@@ -87,8 +86,8 @@ websocket_handle({text, SerializedJSON}, #state{user_id = UserID} = State) ->
 websocket_handle(_Frame, State) ->
     {ok, State}.
 
-websocket_info({tweet, TweetType, {UserID, TweetContent}}, State) ->
-    {[{text, util:encode_json(#{tweet => #{user_id => UserID, tweet_type => TweetType, tweet => list_to_binary(TweetContent)}})}], State};
+websocket_info({tweet, TweetType, {PosterID, TweetContent}}, State) ->
+    {[{text, util:encode_json(#{tweet => #{poster_id => PosterID, tweet_type => TweetType, content => TweetContent}})}], State};
 websocket_info(_Info, State) ->
     {ok, State}.
 
@@ -97,8 +96,8 @@ terminate(_Reason, _PartialReq, _State) ->
 
 %% Utility Functions
 query(RequestID, Query, State) ->
-    QueryResult = lists:map(fun ({PosterID, Content}) -> #{poster_id => PosterID, tweet => list_to_binary(Content)} end, store:query_tweets(Query)),
-    {[{text, util:encode_json(#{request_id => RequestID, success => #{query => QueryResult}})}], State}.
+    QueryResult = lists:map(fun ({PosterID, Content}) -> #{poster_id => PosterID, content => Content} end, store:query_tweets(Query)),
+    {[{text, util:encode_json(#{request_id => RequestID, success => #{query => Query, result => QueryResult}})}], State}.
 
 notify_followers(UserID, Message) ->
     lists:foreach(

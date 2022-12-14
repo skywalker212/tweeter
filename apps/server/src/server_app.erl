@@ -16,7 +16,7 @@ start(_StartType, _StartArgs) ->
     store:init(),
     % start server
     Dispatch = cowboy_router:compile([
-        {'_', [{"/", tweeter, #{}}]}
+        {'_', [{"/ws", tweeter, #{}}]}
     ]),
     cowboy:start_clear(?WS_LISTENER,
         [{port, 5000}],
@@ -25,6 +25,7 @@ start(_StartType, _StartArgs) ->
     server_sup:start_link().
 
 stop(_State) ->
+    store:cleanup(),
     ok = cowboy:stop_listener(?WS_LISTENER).
 
 %% internal functions

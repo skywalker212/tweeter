@@ -14,8 +14,6 @@
 -define(SERVER, ?MODULE).
 
 start_link(N) ->
-    % store words to be used in tweets in an ETS table
-    generator:save_words(),
     supervisor:start_link(?MODULE, [N]).
 
 %% sup_flags() = #{strategy => strategy(),         % optional
