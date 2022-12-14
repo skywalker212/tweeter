@@ -5,10 +5,12 @@
     {mod, {server_app, []}},
     {applications, [
         kernel,
-        stdlib
+        stdlib,
+        cowboy,
+        jiffy
     ]},
     {env, []},
-    {modules, [server_app, server_sup, store, t_worker, tweeter, util]},
+    {modules, [server_app, server_sup, store, tweeter, util]},
 
     {licenses, ["Apache-2.0"]},
     {links, []}

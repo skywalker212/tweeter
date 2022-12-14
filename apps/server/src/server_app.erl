@@ -9,13 +9,22 @@
 
 -export([start/2, stop/1]).
 
+-define(WS_LISTENER, websocket_listener).
+
 start(_StartType, _StartArgs) ->
     % initialize DB
     store:init(),
     % start server
+    Dispatch = cowboy_router:compile([
+        {'_', [{"/", tweeter, #{}}]}
+    ]),
+    cowboy:start_clear(?WS_LISTENER,
+        [{port, 5000}],
+        #{env => #{dispatch => Dispatch}}
+    ),
     server_sup:start_link().
 
 stop(_State) ->
-    ok.
+    ok = cowboy:stop_listener(?WS_LISTENER).
 
 %% internal functions

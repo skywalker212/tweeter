@@ -21,7 +21,7 @@
     get_user_tweets/2,
     get_last_tweet_id/0,
     query_tweets/1,
-    get_user_pid/1,
+    get_handler_pid_from_user_id/1,
     total_pids/0
 ]).
 
@@ -30,6 +30,7 @@
 -define(MENTION_TABLE_NAME, mention).
 -define(HASHTAG_TABLE_NAME, hashtag).
 -define(PID_TABLE_NAME, pid).
+-define(REVERSE_PID_TABLE_NAME, reverse_pid).
 
 -record(user, {
     id,
@@ -59,6 +60,7 @@ init() ->
     ets:new(?MENTION_TABLE_NAME, TableOptions),
     ets:new(?HASHTAG_TABLE_NAME, TableOptions),
     ets:new(?PID_TABLE_NAME, TableOptions),
+    ets:new(?REVERSE_PID_TABLE_NAME, TableOptions),
     ok.
 
 get_value(TableName, TableKey) ->
@@ -74,6 +76,7 @@ save_user(ID, PID) ->
         _ -> ok
     end,
     ets:insert(?PID_TABLE_NAME, {ID, PID}),
+    ets:insert(?REVERSE_PID_TABLE_NAME, {PID, ID}),
     ok.
 
 get_user(ID) ->
@@ -230,7 +233,7 @@ get_last_tweet_id() ->
         Key -> Key
     end.
 
-get_user_pid(ID) ->
+get_handler_pid_from_user_id(ID) ->
     {_, PID} = get_value(?PID_TABLE_NAME, ID),
     PID.
 

@@ -32,10 +32,10 @@ init([]) ->
         period => 1
     },
     ChildSpecs = [
-        #{
-            id => "server",
-            start => {tweeter, start_link, []}
-        }
+        % #{
+        %     id => "server",
+        %     start => {tweeter, start_link, []}
+        % }
     ],
     {ok, {SupFlags, ChildSpecs}}.
 
