@@ -9,41 +9,11 @@
 ]).
 
 -record(state, {
-    user_id
+    user_id,
+    challenge,
+    authenticated = false,
+    public_key
 }).
-
-% %% API
-% register_user(UserID) ->
-%     Now = erlang:system_time(nanosecond),
-%     RequestID = UserID ++ integer_to_list(Now),
-%     % assuming the client would be calling these functions so using self() pid
-%     gen_server:cast(?MODULE, {self(), RequestID, register, UserID}),
-%     {RequestID, Now}.
-% follow_user(UserID, FollowerID) ->
-%     Now = erlang:system_time(nanosecond),
-%     RequestID = UserID ++ integer_to_list(Now),
-%     gen_server:cast(?MODULE, {self(), RequestID, follow, UserID, FollowerID}),
-%     {RequestID, Now}.
-% tweet(UserID, Content) ->
-%     Now = erlang:system_time(nanosecond),
-%     RequestID = UserID ++ integer_to_list(Now),
-%     gen_server:cast(?MODULE, {self(), RequestID, tweet, UserID, Content}),
-%     {RequestID, Now}.
-% re_tweet(UserID, TweetID) ->
-%     Now = erlang:system_time(nanosecond),
-%     RequestID = UserID ++ integer_to_list(Now),
-%     gen_server:cast(?MODULE, {self(), RequestID, re_tweet, UserID, TweetID}),
-%     {RequestID, Now}.
-% user_mentions(UserID) ->
-%     Now = erlang:system_time(nanosecond),
-%     RequestID = UserID ++ integer_to_list(Now),
-%     gen_server:cast(?MODULE, {self(), RequestID, mentions, UserID}),
-%     {RequestID, Now}.
-% query(UserID, Query) ->
-%     Now = erlang:system_time(nanosecond),
-%     RequestID = UserID ++ integer_to_list(Now),
-%     gen_server:cast(?MODULE, {self(), RequestID, query, Query}),
-%     {RequestID, Now}.
 
 %% cowboy websocket handler impelemtation
 init(Req, _State) ->
@@ -52,13 +22,40 @@ init(Req, _State) ->
 websocket_init(State) ->
     {[{text, "ack"}], State}.
 
-websocket_handle({text, SerializedJSON}, #state{user_id = UserID} = State) ->
+websocket_handle({text, SerializedJSON}, #state{authenticated = false, challenge = undefined} = State) ->
     RequestMap = util:decode_json(SerializedJSON),
     case RequestMap of
         #{<<"request_id">> := RequestID, <<"register">> := Data} ->
-            #{<<"user_id">> := ID} = Data,
-            NewUser = store:save_user(ID, self()),
-            {[{text, util:encode_json(#{request_id => RequestID, success => #{register => NewUser}})}], State#state{user_id = ID}};
+            #{<<"user_id">> := ID, <<"public_key">> := EncodedPublicKey} = Data,
+            store:save_user(ID, util:decode_public_key(list_to_binary(EncodedPublicKey))),
+            store:set_handler_pid_for_user_id(ID, self()),
+            {[{text, util:encode_json(#{request_id => RequestID, success => #{register => true}})}], State#state{user_id = ID, authenticated = true}};
+        #{<<"request_id">> := RequestID, <<"login">> := Data} ->
+            #{<<"user_id">> := ID, <<"public_key">> := EncodedPublicKey} = Data,
+            PublicKey = store:get_public_key(ID),
+            case util:decode_public_key(list_to_binary(EncodedPublicKey)) =:= PublicKey of
+                true ->
+                    Challenge = util:generate_challenge(),
+                    {[{text, util:encode_json(#{request_id => RequestID, success => #{login => true}, challenge => Challenge})}], State#state{user_id = ID, challenge = {erlang:system_time(millisecond), Challenge}, public_key = PublicKey}};
+                false ->
+                    {[{text, util:encode_json(#{request_id => RequestID, error => <<"Invalid Public Key">>})}], State}
+            end;
+        Request ->
+            {[{text, util:encode_json(#{error => <<"403: User Not Logged in">>, request => Request})}], State}
+    end;
+websocket_handle({binary, SignedChallenge}, #state{user_id = UserID, authenticated = false, challenge = {ChallengeTimestamp, Challenge}, public_key = PublicKey} = State) ->
+    case util:verify_challenge(SignedChallenge, Challenge, ChallengeTimestamp, PublicKey) of
+        true ->
+            io:format("Verification successful!"),
+            store:set_handler_pid_for_user_id(UserID, self()),
+            {[{text, util:encode_json(#{success => #{challenge => true}})}], State#state{authenticated = true, challenge = undefined}};
+        false ->
+            io:format("Verification failed!"),
+            {[{text, util:encode_json(#{error => #{challenge => false}})}], State}
+    end;
+websocket_handle({text, SerializedJSON}, #state{user_id = UserID, authenticated = true, challenge = undefined} = State) ->
+    RequestMap = util:decode_json(SerializedJSON),
+    case RequestMap of
         #{<<"request_id">> := RequestID, <<"tweet">> := Data} ->
             #{<<"content">> := TweetContent} = Data,
             TweetID = UserID ++ integer_to_list(util:get_utc_seconds()),
@@ -80,8 +77,8 @@ websocket_handle({text, SerializedJSON}, #state{user_id = UserID} = State) ->
             query(RequestID, "@" ++ UserID, State);
         #{<<"request_id">> := RequestID, <<"query">> := Query} ->
             query(RequestID, Query, State);
-        _ ->
-            {[{text, util:encode_json(#{error => <<"Unknown Request">>})}], State}
+        Request ->
+            {[{text, util:encode_json(#{error => <<"Unknown Request">>, request => Request})}], State}
     end;
 websocket_handle(_Frame, State) ->
     {ok, State}.

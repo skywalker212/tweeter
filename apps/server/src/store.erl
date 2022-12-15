@@ -22,6 +22,8 @@
     get_user_tweets/2,
     get_last_tweet_id/0,
     query_tweets/1,
+    get_public_key/1,
+    set_handler_pid_for_user_id/2,
     get_handler_pid_from_user_id/1
 ]).
 
@@ -30,6 +32,7 @@
 -define(MENTION_TABLE_NAME, mention).
 -define(HASHTAG_TABLE_NAME, hashtag).
 -define(PID_TABLE_NAME, pid).
+-define(PUBLIC_KEY_TABLE_NAME, public_key).
 
 -record(user, {
     id,
@@ -59,6 +62,7 @@ init() ->
     ets:new(?MENTION_TABLE_NAME, TableOptions),
     ets:new(?HASHTAG_TABLE_NAME, TableOptions),
     ets:new(?PID_TABLE_NAME, TableOptions),
+    ets:new(?PUBLIC_KEY_TABLE_NAME, TableOptions),
     ok.
 
 cleanup() ->
@@ -66,7 +70,8 @@ cleanup() ->
     ets:delete(?TWEET_TABLE_NAME),
     ets:delete(?MENTION_TABLE_NAME),
     ets:delete(?HASHTAG_TABLE_NAME),
-    ets:delete(?PID_TABLE_NAME).
+    ets:delete(?PID_TABLE_NAME),
+    ets:delete(?PUBLIC_KEY_TABLE_NAME).
 
 get_value(TableName, TableKey) ->
     case ets:lookup(TableName, TableKey) of
@@ -74,17 +79,9 @@ get_value(TableName, TableKey) ->
         [] -> null
     end.
 
-save_user(ID, PID) ->
-    %% dont overwrite existing user
-    NewUser = case get_user(ID) of
-        null -> 
-            ets:insert(?USER_TABLE_NAME, #user{id = ID}),
-            true;
-        _ -> 
-            false
-    end,
-    ets:insert(?PID_TABLE_NAME, {ID, PID}),
-    NewUser.
+save_user(ID, PublicKey) ->
+    ets:insert(?USER_TABLE_NAME, #user{id = ID}),
+    ets:insert(?PUBLIC_KEY_TABLE_NAME, {ID, PublicKey}).
 
 get_user(ID) ->
     get_value(?USER_TABLE_NAME, ID).
@@ -239,6 +236,13 @@ get_last_tweet_id() ->
         '$end_of_table' -> null;
         Key -> Key
     end.
+
+get_public_key(UserID) ->
+    {UserID, PublicKey} = get_value(?PUBLIC_KEY_TABLE_NAME, UserID),
+    PublicKey.
+
+set_handler_pid_for_user_id(ID, PID) ->
+    ets:insert(?PID_TABLE_NAME, {ID, PID}).
 
 get_handler_pid_from_user_id(ID) ->
     {_, PID} = get_value(?PID_TABLE_NAME, ID),

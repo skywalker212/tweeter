@@ -4,8 +4,15 @@
     get_utc_seconds/1,
     strip_whitespace/1,
     decode_json/1,
-    encode_json/1
+    encode_json/1,
+    generate_challenge/0,
+    generate_key_pair/0,
+    encode_public_key/1,
+    decode_public_key/1,
+    sign_challenge/2,
+    verify_challenge/4
 ]).
+-include_lib("public_key/include/public_key.hrl").
 
 get_utc_seconds() ->
     calendar:datetime_to_gregorian_seconds(calendar:universal_time()).
@@ -34,3 +41,36 @@ update_map(Map) ->
                 end
         end
     end, Map).
+
+%% functions for security ------ TOP SECRET
+
+generate_challenge() ->
+    generate_random_list(32, []).
+% returns {PublicKey, PrivateKey}
+generate_key_pair() ->
+    PrivateKey = public_key:generate_key({rsa, 2048, 65537}),
+    {#'RSAPublicKey'{ modulus = PrivateKey#'RSAPrivateKey'.modulus, publicExponent = PrivateKey#'RSAPrivateKey'.publicExponent}, PrivateKey}.
+
+encode_public_key(PublicKey) ->
+    PemEntry = public_key:pem_entry_encode('RSAPublicKey', PublicKey),
+    public_key:pem_encode([PemEntry]).
+
+decode_public_key(PublicKeyBinary) ->
+    [PemEntry] = public_key:pem_decode(PublicKeyBinary),
+    public_key:pem_entry_decode(PemEntry).
+
+sign_challenge(Challenge, PrivKey) ->
+    public_key:encrypt_private(Challenge, PrivKey).
+
+verify_challenge(SignedChallenge, OriginalChallenge, ChallengeTimestamp, PubKey) ->
+    try #{<<"timestamp">> := _, <<"challenge">> := OriginalChallenge} = decode_json(public_key:decrypt_public(SignedChallenge, PubKey)) of
+        _ -> erlang:system_time(millisecond) =< ChallengeTimestamp + 1000
+    catch
+        _ -> false
+    end.
+
+generate_random_list(0, List) -> List;
+generate_random_list(N, List) ->
+    generate_random_list(N-1, [generate_random_char() | List]).
+
+generate_random_char() -> rand:uniform(93) + 33.

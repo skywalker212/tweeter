@@ -12,7 +12,7 @@
     code_change/3
 ]).
 
-%% startup time in miliseconds to wait other clients to register themselves before performing actions
+%% startup time in milliseconds to wait other clients to register themselves before performing actions
 -define(START_TIME, 500).
 %% Interval at which to publish tweet/retweet
 -define(TWEET_INTERVAL, 100).
@@ -34,7 +34,10 @@
     pending_requests = [],
     request_times = [],
     conn_pid,
-    stream_ref
+    stream_ref,
+    key_pair,
+    new_user,
+    authenticated = false
 }).
 
 %% API
@@ -43,19 +46,29 @@ start_link(UserID, N) ->
 
 %% GEN SERVER IMPLEMENTATION
 init([UserID, N]) ->
+    {NewUser, KeyPair} = case c_store:get_key_pair(UserID) of
+        null ->
+            GeneratedKeyPair = util:generate_key_pair(),
+            c_store:store_key_pair(UserID, GeneratedKeyPair),
+            {true, GeneratedKeyPair};
+        KP -> {false, KP}
+    end,
     process_flag(trap_exit, true),
-    IntID = list_to_integer(UserID),
     {ok, ConnPid} = gun:open("localhost", 5000),
+    IntID = list_to_integer(UserID),
     State = #state{
         n = N,
         user_id = UserID,
         total_followers = trunc(math:floor((N * 2) / (IntID * 3))),
-        conn_pid = ConnPid
+        conn_pid = ConnPid,
+        key_pair = KeyPair,
+        new_user = NewUser
     },
     {ok, State}.
 
 handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
+
 
 handle_cast(
     {follow, FollowerID}, #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests} = State
@@ -120,6 +133,7 @@ handle_cast({query, Query}, #state{conn_pid = ConnPid, stream_ref = StreamRef, p
     QueryRequest = send_ws_message(ConnPid, StreamRef, #{query => Query}),
     {noreply, State#state{pending_requests = [QueryRequest | PendingRequests]}}.
 
+
 %% web socket connection establishment
 handle_info(
     {gun_up, ConnPid, _},
@@ -139,12 +153,19 @@ handle_info(
         user_id = UserID,
         conn_pid = ConnPid,
         stream_ref = StreamRef,
-        pending_requests = PendingRequests
+        pending_requests = PendingRequests,
+        key_pair = {PublicKey, _},
+        new_user = NewUser,
+        authenticated = false
     } = State
 ) ->
-    RequestID = send_ws_message(ConnPid, StreamRef, #{register => #{user_id => UserID}}),
+    case NewUser of
+        true ->
+            RequestID = send_ws_message(ConnPid, StreamRef, #{register => #{user_id => UserID, public_key => util:encode_public_key(PublicKey)}});
+        false ->
+            RequestID = send_ws_message(ConnPid, StreamRef, #{login => #{user_id => UserID, public_key => util:encode_public_key(PublicKey)}})
+    end,
     {noreply, State#state{pending_requests = [RequestID | PendingRequests]}};
-%% acknowledgement messages
 handle_info(
     {gun_ws, ConnPid, StreamRef, {text, SerializedJSON}},
     #state{
@@ -154,7 +175,56 @@ handle_info(
         n = N,
         total_followers = TotalFollowers,
         request_times = RequestTimes,
-        pending_requests = PendingRequests
+        pending_requests = PendingRequests,
+        authenticated = false,
+        key_pair = {_, PrivateKey}
+    } = State
+) ->
+    RequestMap = util:decode_json(SerializedJSON),
+    case RequestMap of
+        #{<<"request_id">> := RequestID, <<"success">> := #{<<"register">> := true}} ->
+            {UpdatedRequestTimes, UpdatedPendingRequests} = update_request_times(
+                register_account, RequestID, RequestTimes, PendingRequests
+            ),
+            ?PRINT("[~s, ~p] registered successfully~n", [UserID, RequestID]),
+            IntID = list_to_integer(UserID),
+            Followers = generate_follow_users(
+                TotalFollowers, lists:delete(IntID, lists:seq(1, N)), []
+            ),
+            % store the self pid in table for others to read
+            c_store:store_client_pid(UserID),
+            % wait for START_TIME milliseconds before making users follow current user so that other users have enough time to start up and register themselves
+            {noreply,
+                State#state{
+                    followers = Followers,
+                    request_times = UpdatedRequestTimes,
+                    pending_requests = UpdatedPendingRequests,
+                    authenticated = true
+                },
+                ?START_TIME};
+        #{<<"request_id">> := _, <<"success">> := #{<<"login">> := true}, <<"challenge">> := Challenge} ->
+            SignedChallenge = util:sign_challenge(util:encode_json(#{timestamp => erlang:system_time(millisecond), challenge => Challenge}), PrivateKey),
+            gun:ws_send(ConnPid, StreamRef, {binary, SignedChallenge}),
+            {noreply, State};
+        #{<<"success">> := #{<<"challenge">> := true}} ->
+            % store the self pid in table for others to read
+            c_store:store_client_pid(UserID),
+            % start generating content
+            schedule_tweet(),
+            schedule_mention_query(),
+            {noreply, State#state{authenticated = true}}
+    end;
+
+%% acknowledgement messages
+handle_info(
+    {gun_ws, ConnPid, StreamRef, {text, SerializedJSON}},
+    #state{
+        user_id = UserID,
+        conn_pid = ConnPid,
+        stream_ref = StreamRef,
+        request_times = RequestTimes,
+        pending_requests = PendingRequests,
+        authenticated = true
     } = State
 ) ->
     RequestMap = util:decode_json(SerializedJSON),
@@ -165,31 +235,6 @@ handle_info(
         #{<<"tweet">> := #{<<"poster_id">> := PosterID, <<"tweet_type">> := TweetType, <<"content">> := TweetContent}} ->
             ?PRINT("[~s] ~s received from ~s: ~s~n", [UserID, TweetType, PosterID, TweetContent]),
             {noreply, State};
-        #{<<"request_id">> := RequestID, <<"success">> := #{<<"register">> := NewUser}} ->
-            {UpdatedRequestTimes, UpdatedPendingRequests} = update_request_times(
-                register_account, RequestID, RequestTimes, PendingRequests
-            ),
-            ?PRINT("[~s, ~p] registered successfully~n", [UserID, RequestID]),
-            % TODO: Don't do this for reconnecting client, do this only for newly registered clients
-            Followers = case NewUser of
-                true ->
-                    IntID = list_to_integer(UserID),
-                    generate_follow_users(
-                        TotalFollowers, lists:delete(IntID, lists:seq(1, N)), []
-                    );
-                false ->
-                    []
-            end,
-            % store the self pid in table for others to read
-            ets:insert(client_pid, {UserID, self()}),
-            % wait for START_TIME miliseconds before making users follow current user so that other users have enough time to start up and register themselves
-            {noreply,
-                State#state{
-                    followers = Followers,
-                    request_times = UpdatedRequestTimes,
-                    pending_requests = UpdatedPendingRequests
-                },
-                ?START_TIME};
         #{<<"request_id">> := RequestID, <<"success">> := #{<<"follow">> := FollowUserID}} ->
             {UpdatedRequestTimes, UpdatedPendingRequests} = update_request_times(
                 follow_user, RequestID, RequestTimes, PendingRequests
@@ -227,11 +272,11 @@ handle_info(
     end;
 %% handle initial cooldown timeout before starting the simulation
 handle_info(timeout, #state{n = N, user_id = UserID, followers = Followers} = State) ->
-    case ets:info(client_pid, size) of
+    case c_store:get_alive_clients() of
         N ->
             lists:foreach(
                 fun(Follower) ->
-                    [{_, PID}] = ets:lookup(client_pid, Follower),
+                    PID = c_store:get_client_pid(Follower),
                     % Make the Follower follow the current user
                     gen_server:cast(PID, {follow, UserID})
                 end,
@@ -250,7 +295,7 @@ terminate(
         user_id = UserID, start_time = StartTime, request_times = RequestTimes, conn_pid = ConnPid
     } = State
 ) ->
-    ets:delete(client_pid, UserID),
+    c_store:delete_client_pid(UserID),
     ok = gun:shutdown(ConnPid),
     RequestTimesDict = lists:foldr(
         fun({K, V}, D) -> dict:append(K, V, D) end, dict:new(), RequestTimes
