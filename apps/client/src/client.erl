@@ -92,9 +92,16 @@ handle_call(_Msg, _From, State) ->
 
 handle_cast(
     {follow, FollowerID},
-    #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests, hmac_key = HMACKey} = State
+    #state{
+        conn_pid = ConnPid,
+        stream_ref = StreamRef,
+        pending_requests = PendingRequests,
+        hmac_key = HMACKey
+    } = State
 ) ->
-    RequestID = send_signed_ws_message(ConnPid, StreamRef, #{follow => #{follow_id => FollowerID}}, HMACKey),
+    RequestID = send_signed_ws_message(
+        ConnPid, StreamRef, #{follow => #{follow_id => FollowerID}}, HMACKey
+    ),
     {noreply, State#state{pending_requests = [RequestID | PendingRequests]}};
 handle_cast(
     {schedule_tweet},
@@ -119,14 +126,16 @@ handle_cast(
                             Request = [];
                         ID ->
                             Request = [
-                                send_signed_ws_message(ConnPid, StreamRef, #{re_tweet => #{tweet_id => ID}}, HMACKey)
+                                send_signed_ws_message(
+                                    ConnPid, StreamRef, #{re_tweet => #{tweet_id => ID}}, HMACKey
+                                )
                             ]
                     end;
                 _ ->
                     Request = [
                         send_signed_ws_message(
-                            ConnPid, 
-                            StreamRef, 
+                            ConnPid,
+                            StreamRef,
                             #{tweet => #{content => generator:generate_tweet(N)}},
                             HMACKey
                         )
@@ -140,19 +149,38 @@ handle_cast(
     {noreply, State#state{pending_requests = PendingRequests ++ Request}};
 handle_cast(
     {tweet, TweetContent},
-    #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests, hmac_key = HMACKey} = State
+    #state{
+        conn_pid = ConnPid,
+        stream_ref = StreamRef,
+        pending_requests = PendingRequests,
+        hmac_key = HMACKey
+    } = State
 ) ->
-    TweetRequest = send_signed_ws_message(ConnPid, StreamRef, #{tweet => #{content => TweetContent}}, HMACKey),
+    TweetRequest = send_signed_ws_message(
+        ConnPid, StreamRef, #{tweet => #{content => TweetContent}}, HMACKey
+    ),
     {noreply, State#state{pending_requests = [TweetRequest | PendingRequests]}};
 handle_cast(
     {re_tweet, TweetID},
-    #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests, hmac_key = HMACKey} = State
+    #state{
+        conn_pid = ConnPid,
+        stream_ref = StreamRef,
+        pending_requests = PendingRequests,
+        hmac_key = HMACKey
+    } = State
 ) ->
-    RetweetRequest = send_signed_ws_message(ConnPid, StreamRef, #{re_tweet => #{tweet_id => TweetID}}, HMACKey),
+    RetweetRequest = send_signed_ws_message(
+        ConnPid, StreamRef, #{re_tweet => #{tweet_id => TweetID}}, HMACKey
+    ),
     {noreply, State#state{pending_requests = [RetweetRequest | PendingRequests]}};
 handle_cast(
     {schedule_mention_query},
-    #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests, hmac_key = HMACKey} = State
+    #state{
+        conn_pid = ConnPid,
+        stream_ref = StreamRef,
+        pending_requests = PendingRequests,
+        hmac_key = HMACKey
+    } = State
 ) ->
     % make a mention query with 10% chance
     case rand:uniform(10) of
@@ -164,13 +192,23 @@ handle_cast(
     {noreply, State#state{pending_requests = PendingRequests ++ Request}};
 handle_cast(
     {mentions},
-    #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests, hmac_key = HMACKey} = State
+    #state{
+        conn_pid = ConnPid,
+        stream_ref = StreamRef,
+        pending_requests = PendingRequests,
+        hmac_key = HMACKey
+    } = State
 ) ->
     MentionRequest = send_signed_ws_message(ConnPid, StreamRef, #{mentions => true}, HMACKey),
     {noreply, State#state{pending_requests = [MentionRequest | PendingRequests]}};
 handle_cast(
     {query, Query},
-    #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests, hmac_key = HMACKey} = State
+    #state{
+        conn_pid = ConnPid,
+        stream_ref = StreamRef,
+        pending_requests = PendingRequests,
+        hmac_key = HMACKey
+    } = State
 ) ->
     QueryRequest = send_signed_ws_message(ConnPid, StreamRef, #{query => Query}, HMACKey),
     {noreply, State#state{pending_requests = [QueryRequest | PendingRequests]}}.
@@ -205,13 +243,13 @@ handle_info(
         true ->
             RequestID = send_ws_message(ConnPid, StreamRef, #{
                 register => #{user_id => UserID},
-                rsa_public_key => util:encode_public_key(RSAPublicKey), 
+                rsa_public_key => util:encode_public_key(RSAPublicKey),
                 ecdh_public_key => util:encode_data(ECDHPublicKey)
             });
         false ->
             RequestID = send_ws_message(ConnPid, StreamRef, #{
-                login => #{user_id => UserID}, 
-                rsa_public_key => util:encode_public_key(RSAPublicKey), 
+                login => #{user_id => UserID},
+                rsa_public_key => util:encode_public_key(RSAPublicKey),
                 ecdh_public_key => util:encode_data(ECDHPublicKey)
             })
     end,
@@ -233,7 +271,11 @@ handle_info(
 ) ->
     RequestMap = util:decode_json(SerializedJSON),
     case RequestMap of
-        #{<<"request_id">> := RequestID, <<"success">> := #{<<"register">> := true}, <<"ecdh_public_key">> := EncodedServerECDHPublicKey} ->
+        #{
+            <<"request_id">> := RequestID,
+            <<"success">> := #{<<"register">> := true},
+            <<"ecdh_public_key">> := EncodedServerECDHPublicKey
+        } ->
             ServerECDHPublicKey = util:decode_data(EncodedServerECDHPublicKey),
             {UpdatedRequestTimes, UpdatedPendingRequests} = update_request_times(
                 register_account, RequestID, RequestTimes, PendingRequests
@@ -268,8 +310,12 @@ handle_info(
                 }),
                 RSAPrivateKey
             ),
-            RequestID = send_ws_message(RequestID, ConnPid, StreamRef, #{signed_challenge => util:encode_data(SignedChallenge)}),
-            {noreply, State#state{hmac_key = util:generate_hmac_key(ECDHPrivateKey, ServerECDHPublicKey)}};
+            RequestID = send_ws_message(RequestID, ConnPid, StreamRef, #{
+                signed_challenge => util:encode_data(SignedChallenge)
+            }),
+            {noreply, State#state{
+                hmac_key = util:generate_hmac_key(ECDHPrivateKey, ServerECDHPublicKey)
+            }};
         #{<<"request_id">> := RequestID, <<"success">> := #{<<"challenge">> := true}} ->
             % store the self pid in table for others to read
             c_store:store_client_pid(UserID),
@@ -417,7 +463,10 @@ send_signed_ws_message(ConnPid, StreamRef, Message, HMACKey) ->
     gun:ws_send(
         ConnPid,
         StreamRef,
-        {text, util:encode_json(#{data => maps:merge(#{request_id => RequestID}, Message), hmac => EncodedHMAC})}
+        {text,
+            util:encode_json(#{
+                data => maps:merge(#{request_id => RequestID}, Message), hmac => EncodedHMAC
+            })}
     ),
     RequestID.
 

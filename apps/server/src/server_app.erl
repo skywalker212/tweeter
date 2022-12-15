@@ -18,7 +18,8 @@ start(_StartType, _StartArgs) ->
     Dispatch = cowboy_router:compile([
         {'_', [{"/ws", tweeter, #{}}]}
     ]),
-    cowboy:start_clear(?WS_LISTENER,
+    cowboy:start_clear(
+        ?WS_LISTENER,
         [{port, 5000}],
         #{env => #{dispatch => Dispatch}}
     ),
