@@ -46,13 +46,15 @@ start_link(UserID, N) ->
 
 %% GEN SERVER IMPLEMENTATION
 init([UserID, N]) ->
-    {NewUser, KeyPair} = case c_store:get_key_pair(UserID) of
-        null ->
-            GeneratedKeyPair = util:generate_key_pair(),
-            c_store:store_key_pair(UserID, GeneratedKeyPair),
-            {true, GeneratedKeyPair};
-        KP -> {false, KP}
-    end,
+    {NewUser, KeyPair} =
+        case c_store:get_key_pair(UserID) of
+            null ->
+                GeneratedKeyPair = util:generate_key_pair(),
+                c_store:store_key_pair(UserID, GeneratedKeyPair),
+                {true, GeneratedKeyPair};
+            KP ->
+                {false, KP}
+        end,
     process_flag(trap_exit, true),
     {ok, ConnPid} = gun:open("localhost", 5000),
     IntID = list_to_integer(UserID),
@@ -69,9 +71,9 @@ init([UserID, N]) ->
 handle_call(_Msg, _From, State) ->
     {reply, ok, State}.
 
-
 handle_cast(
-    {follow, FollowerID}, #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests} = State
+    {follow, FollowerID},
+    #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests} = State
 ) ->
     RequestID = send_ws_message(ConnPid, StreamRef, #{follow => #{follow_id => FollowerID}}),
     {noreply, State#state{pending_requests = [RequestID | PendingRequests]}};
@@ -93,11 +95,19 @@ handle_cast(
                 4 ->
                     % retweet the last tweet, may happen that we retweet someone's retweet but it's fine for our simulation purposes
                     case store:get_last_tweet_id() of
-                        null -> Request = [];
-                        ID -> Request = [send_ws_message(ConnPid, StreamRef, #{re_tweet => #{ tweet_id => ID }})]
+                        null ->
+                            Request = [];
+                        ID ->
+                            Request = [
+                                send_ws_message(ConnPid, StreamRef, #{re_tweet => #{tweet_id => ID}})
+                            ]
                     end;
                 _ ->
-                    Request = [send_ws_message(ConnPid, StreamRef, #{tweet => #{content => generator:generate_tweet(N)}})]
+                    Request = [
+                        send_ws_message(ConnPid, StreamRef, #{
+                            tweet => #{content => generator:generate_tweet(N)}
+                        })
+                    ]
             end;
         _ ->
             Request = []
@@ -106,17 +116,20 @@ handle_cast(
     schedule_tweet(),
     {noreply, State#state{pending_requests = PendingRequests ++ Request}};
 handle_cast(
-    {tweet, TweetContent}, #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests} = State
+    {tweet, TweetContent},
+    #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests} = State
 ) ->
     TweetRequest = send_ws_message(ConnPid, StreamRef, #{tweet => #{content => TweetContent}}),
     {noreply, State#state{pending_requests = [TweetRequest | PendingRequests]}};
 handle_cast(
-    {re_tweet, TweetID}, #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests} = State
+    {re_tweet, TweetID},
+    #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests} = State
 ) ->
-    RetweetRequest = send_ws_message(ConnPid, StreamRef, #{re_tweet => #{ tweet_id => TweetID }}),
+    RetweetRequest = send_ws_message(ConnPid, StreamRef, #{re_tweet => #{tweet_id => TweetID}}),
     {noreply, State#state{pending_requests = [RetweetRequest | PendingRequests]}};
 handle_cast(
-    {schedule_mention_query}, #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests} = State
+    {schedule_mention_query},
+    #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests} = State
 ) ->
     % make a mention query with 10% chance
     case rand:uniform(10) of
@@ -126,13 +139,18 @@ handle_cast(
     % schedule next query
     schedule_mention_query(),
     {noreply, State#state{pending_requests = PendingRequests ++ Request}};
-handle_cast({mentions}, #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests} = State) ->
+handle_cast(
+    {mentions},
+    #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests} = State
+) ->
     MentionRequest = send_ws_message(ConnPid, StreamRef, #{mentions => true}),
     {noreply, State#state{pending_requests = [MentionRequest | PendingRequests]}};
-handle_cast({query, Query}, #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests} = State) ->
+handle_cast(
+    {query, Query},
+    #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests} = State
+) ->
     QueryRequest = send_ws_message(ConnPid, StreamRef, #{query => Query}),
     {noreply, State#state{pending_requests = [QueryRequest | PendingRequests]}}.
-
 
 %% web socket connection establishment
 handle_info(
@@ -161,9 +179,13 @@ handle_info(
 ) ->
     case NewUser of
         true ->
-            RequestID = send_ws_message(ConnPid, StreamRef, #{register => #{user_id => UserID, public_key => util:encode_public_key(PublicKey)}});
+            RequestID = send_ws_message(ConnPid, StreamRef, #{
+                register => #{user_id => UserID, public_key => util:encode_public_key(PublicKey)}
+            });
         false ->
-            RequestID = send_ws_message(ConnPid, StreamRef, #{login => #{user_id => UserID, public_key => util:encode_public_key(PublicKey)}})
+            RequestID = send_ws_message(ConnPid, StreamRef, #{
+                login => #{user_id => UserID, public_key => util:encode_public_key(PublicKey)}
+            })
     end,
     {noreply, State#state{pending_requests = [RequestID | PendingRequests]}};
 handle_info(
@@ -202,8 +224,17 @@ handle_info(
                     authenticated = true
                 },
                 ?START_TIME};
-        #{<<"request_id">> := _, <<"success">> := #{<<"login">> := true}, <<"challenge">> := Challenge} ->
-            SignedChallenge = util:sign_challenge(util:encode_json(#{timestamp => erlang:system_time(millisecond), challenge => Challenge}), PrivateKey),
+        #{
+            <<"request_id">> := _,
+            <<"success">> := #{<<"login">> := true},
+            <<"challenge">> := Challenge
+        } ->
+            SignedChallenge = util:sign_challenge(
+                util:encode_json(#{
+                    timestamp => erlang:system_time(millisecond), challenge => Challenge
+                }),
+                PrivateKey
+            ),
             gun:ws_send(ConnPid, StreamRef, {binary, SignedChallenge}),
             {noreply, State};
         #{<<"success">> := #{<<"challenge">> := true}} ->
@@ -214,7 +245,6 @@ handle_info(
             schedule_mention_query(),
             {noreply, State#state{authenticated = true}}
     end;
-
 %% acknowledgement messages
 handle_info(
     {gun_ws, ConnPid, StreamRef, {text, SerializedJSON}},
@@ -232,7 +262,13 @@ handle_info(
         #{<<"error">> := Data} ->
             io:format("Error in request ~p ~n", [Data]),
             {noreply, State};
-        #{<<"tweet">> := #{<<"poster_id">> := PosterID, <<"tweet_type">> := TweetType, <<"content">> := TweetContent}} ->
+        #{
+            <<"tweet">> := #{
+                <<"poster_id">> := PosterID,
+                <<"tweet_type">> := TweetType,
+                <<"content">> := TweetContent
+            }
+        } ->
             ?PRINT("[~s] ~s received from ~s: ~s~n", [UserID, TweetType, PosterID, TweetContent]),
             {noreply, State};
         #{<<"request_id">> := RequestID, <<"success">> := #{<<"follow">> := FollowUserID}} ->
@@ -243,7 +279,10 @@ handle_info(
             {noreply, State#state{
                 request_times = UpdatedRequestTimes, pending_requests = UpdatedPendingRequests
             }};
-        #{<<"request_id">> := RequestID, <<"success">> := #{<<"tweet">> := #{<<"type">> := TweetType, <<"id">> := TweetID}}} ->
+        #{
+            <<"request_id">> := RequestID,
+            <<"success">> := #{<<"tweet">> := #{<<"type">> := TweetType, <<"id">> := TweetID}}
+        } ->
             {UpdatedRequestTimes, UpdatedPendingRequests} = update_request_times(
                 publish_tweet, RequestID, RequestTimes, PendingRequests
             ),
@@ -251,7 +290,10 @@ handle_info(
             {noreply, State#state{
                 request_times = UpdatedRequestTimes, pending_requests = UpdatedPendingRequests
             }};
-        #{<<"request_id">> := RequestID, <<"success">> := #{<<"query">> := Query, <<"result">> := QueryResult}} ->
+        #{
+            <<"request_id">> := RequestID,
+            <<"success">> := #{<<"query">> := Query, <<"result">> := QueryResult}
+        } ->
             {UpdatedRequestTimes, UpdatedPendingRequests} = update_request_times(
                 query, RequestID, RequestTimes, PendingRequests
             ),
@@ -260,7 +302,9 @@ handle_info(
                 RequestID,
                 Query,
                 lists:map(
-                    fun(#{<<"poster_id">> := PosterID, <<"content">> := Content}) -> " {[" ++ PosterID ++ "]: " ++ Content ++ "} " end,
+                    fun(#{<<"poster_id">> := PosterID, <<"content">> := Content}) ->
+                        " {[" ++ PosterID ++ "]: " ++ Content ++ "} "
+                    end,
                     QueryResult
                 )
             ]),

@@ -31,16 +31,20 @@ encode_json(Map) ->
 
 % function to convert every binary value of map to a list
 update_map(Map) ->
-    maps:map(fun (_, V) -> 
-        case is_binary(V) of
-            true -> binary_to_list(V);
-            false ->
-                case is_map(V) of
-                    true -> update_map(V);
-                    false -> V
-                end
-        end
-    end, Map).
+    maps:map(
+        fun(_, V) ->
+            case is_binary(V) of
+                true ->
+                    binary_to_list(V);
+                false ->
+                    case is_map(V) of
+                        true -> update_map(V);
+                        false -> V
+                    end
+            end
+        end,
+        Map
+    ).
 
 %% functions for security ------ TOP SECRET
 
@@ -49,7 +53,13 @@ generate_challenge() ->
 % returns {PublicKey, PrivateKey}
 generate_key_pair() ->
     PrivateKey = public_key:generate_key({rsa, 2048, 65537}),
-    {#'RSAPublicKey'{ modulus = PrivateKey#'RSAPrivateKey'.modulus, publicExponent = PrivateKey#'RSAPrivateKey'.publicExponent}, PrivateKey}.
+    {
+        #'RSAPublicKey'{
+            modulus = PrivateKey#'RSAPrivateKey'.modulus,
+            publicExponent = PrivateKey#'RSAPrivateKey'.publicExponent
+        },
+        PrivateKey
+    }.
 
 encode_public_key(PublicKey) ->
     PemEntry = public_key:pem_entry_encode('RSAPublicKey', PublicKey),
@@ -63,14 +73,17 @@ sign_challenge(Challenge, PrivKey) ->
     public_key:encrypt_private(Challenge, PrivKey).
 
 verify_challenge(SignedChallenge, OriginalChallenge, ChallengeTimestamp, PubKey) ->
-    try #{<<"timestamp">> := _, <<"challenge">> := OriginalChallenge} = decode_json(public_key:decrypt_public(SignedChallenge, PubKey)) of
+    try
+        #{<<"timestamp">> := _, <<"challenge">> := OriginalChallenge} = decode_json(
+            public_key:decrypt_public(SignedChallenge, PubKey)
+        )
+    of
         _ -> erlang:system_time(millisecond) =< ChallengeTimestamp + 1000
     catch
         _ -> false
     end.
 
 generate_random_list(0, List) -> List;
-generate_random_list(N, List) ->
-    generate_random_list(N-1, [generate_random_char() | List]).
+generate_random_list(N, List) -> generate_random_list(N - 1, [generate_random_char() | List]).
 
 generate_random_char() -> rand:uniform(93) + 33.
