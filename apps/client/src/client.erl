@@ -106,6 +106,7 @@ handle_cast(
 handle_cast(
     {schedule_tweet},
     #state{
+        user_id = UserID,
         n = N,
         total_followers = TotalFollowers,
         pending_requests = PendingRequests,
@@ -146,7 +147,15 @@ handle_cast(
     end,
     % schedule next tweet
     schedule_tweet(),
-    {noreply, State#state{pending_requests = PendingRequests ++ Request}};
+    % randomly disconnect the client
+    % the way this works is if we stop the client process then the supervisor will automatically spawn a new client process and that process will log in as existing client and do the handshake and start making requests
+    case rand:uniform(1000) of
+        1 ->
+            io:format("[~p] client disconnecting.....~n", [UserID]),
+            {stop, normal, State#state{pending_requests = PendingRequests ++ Request}};
+        _ ->
+            {noreply, State#state{pending_requests = PendingRequests ++ Request}}
+    end;
 handle_cast(
     {tweet, TweetContent},
     #state{
@@ -325,6 +334,7 @@ handle_info(
             % start generating content
             schedule_tweet(),
             schedule_mention_query(),
+            io:format("[~p] client reconnected~n", [UserID]),
             {noreply, State#state{
                 authenticated = true,
                 request_times = UpdatedRequestTimes,

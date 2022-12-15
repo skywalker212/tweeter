@@ -114,7 +114,6 @@ websocket_handle(
                 )
             of
                 true ->
-                    io:format("Verification successful!"),
                     store:set_handler_pid_for_user_id(UserID, self()),
                     {
                         [
@@ -126,7 +125,6 @@ websocket_handle(
                         State#state{authenticated = true, challenge = undefined}
                     };
                 false ->
-                    io:format("Verification failed!"),
                     {[{text, util:encode_json(#{error => #{challenge => false}})}], State}
             end;
         Request ->
