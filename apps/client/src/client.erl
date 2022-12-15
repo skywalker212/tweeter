@@ -1,7 +1,14 @@
 -module(client).
 -behaviour(gen_server).
 
--export([start_link/2]).
+-export([
+    start_link/2,
+    follow/2,
+    tweet/2,
+    re_tweet/2,
+    mentions/1,
+    query/2
+]).
 
 -export([
     init/1,
@@ -43,6 +50,16 @@
 %% API
 start_link(UserID, N) ->
     gen_server:start_link(?MODULE, [UserID, N], []).
+follow(UserID, FollowID) ->
+    send_cast(UserID, {follow, FollowID}).
+tweet(UserID, Content) ->
+    send_cast(UserID, {tweet, Content}).
+re_tweet(UserID, TweetID) ->
+    send_cast(UserID, {re_tweet, TweetID}).
+mentions(UserID) ->
+    send_cast(UserID, {mentions}).
+query(UserID, Query) ->
+    send_cast(UserID, {query, Query}).
 
 %% GEN SERVER IMPLEMENTATION
 init([UserID, N]) ->
@@ -384,3 +401,7 @@ update_request_times(Operation, RequestID, RequestTimes, PendingRequests) ->
     UpdatedPendingRequests = lists:delete(RequestID, PendingRequests),
     UpdatedRequestTimes = [{Operation, erlang:system_time(nanosecond) - RequestID} | RequestTimes],
     {UpdatedRequestTimes, UpdatedPendingRequests}.
+
+send_cast(UserID, Message) ->
+    PID = c_store:get_client_pid(UserID),
+    gen_server:cast(PID, Message).
