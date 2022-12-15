@@ -5,8 +5,11 @@
     strip_whitespace/1,
     decode_json/1,
     encode_json/1,
+    encode_data/1,
+    decode_data/1,
     generate_challenge/0,
-    generate_key_pair/0,
+    generate_key_pair/1,
+    generate_hmac_key/2,
     encode_public_key/1,
     decode_public_key/1,
     sign_challenge/2,
@@ -23,11 +26,17 @@ get_utc_seconds(SecondsBefore) ->
 strip_whitespace(String) ->
     re:replace(String, "(^\\s+)|(\\s+$)", "", [global, {return, list}]).
 
+encode_json(Map) ->
+    jiffy:encode(Map).
+
 decode_json(SerializedJSON) ->
     update_map(jiffy:decode(SerializedJSON, [return_maps, copy_strings])).
 
-encode_json(Map) ->
-    jiffy:encode(Map).
+encode_data(BinaryData) ->
+    base64:encode_to_string(BinaryData).
+
+decode_data(Base64) ->
+    base64:decode(Base64).
 
 % function to convert every binary value of map to a list
 update_map(Map) ->
@@ -51,7 +60,12 @@ update_map(Map) ->
 generate_challenge() ->
     generate_random_list(32, []).
 % returns {PublicKey, PrivateKey}
-generate_key_pair() ->
+generate_key_pair(rsa) ->
+    generate_rsa_key_pair();
+generate_key_pair(ecdh) ->
+    generate_ecdh_key_pair().
+
+generate_rsa_key_pair() ->
     PrivateKey = public_key:generate_key({rsa, 2048, 65537}),
     {
         #'RSAPublicKey'{
@@ -60,6 +74,12 @@ generate_key_pair() ->
         },
         PrivateKey
     }.
+
+generate_ecdh_key_pair() ->
+    crypto:generate_key(ecdh, secp192k1).
+
+generate_hmac_key(MyPrivateKey, OthersPublicKey) ->
+    crypto:compute_key(ecdh, OthersPublicKey, MyPrivateKey, secp192k1).
 
 encode_public_key(PublicKey) ->
     PemEntry = public_key:pem_entry_encode('RSAPublicKey', PublicKey),

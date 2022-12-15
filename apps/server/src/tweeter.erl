@@ -12,7 +12,9 @@
     user_id,
     challenge,
     authenticated = false,
-    public_key
+    client_rsa_public_key,
+    ecdh_key_pair,
+    hmac_key
 }).
 
 %% cowboy websocket handler impelemtation
@@ -20,38 +22,45 @@ init(Req, _State) ->
     {cowboy_websocket, Req, #state{}}.
 
 websocket_init(State) ->
-    {[{text, "ack"}], State}.
+    ECDHKeyPair = util:generate_key_pair(ecdh),
+    {[{text, "ack"}], State#state{ecdh_key_pair = ECDHKeyPair}}.
 
-websocket_handle({text, SerializedJSON}, #state{authenticated = false, challenge = undefined} = State) ->
+websocket_handle({text, SerializedJSON}, #state{authenticated = false, challenge = ChallengeTuple, ecdh_key_pair = {ECDHPublicKey, ECDHPrivateKey}} = State) ->
     RequestMap = util:decode_json(SerializedJSON),
     case RequestMap of
-        #{<<"request_id">> := RequestID, <<"register">> := Data} ->
-            #{<<"user_id">> := ID, <<"public_key">> := EncodedPublicKey} = Data,
-            store:save_user(ID, util:decode_public_key(list_to_binary(EncodedPublicKey))),
+        #{<<"request_id">> := RequestID, <<"register">> := Data, <<"rsa_public_key">> := EncodedClientRSAPublicKey, <<"ecdh_public_key">> := EncodedClientECDHPublicKey} ->
+            #{<<"user_id">> := ID} = Data,
+            ClientECDHPublicKey = util:decode_data(EncodedClientECDHPublicKey),
+            store:save_user(ID, util:decode_public_key(list_to_binary(EncodedClientRSAPublicKey))),
             store:set_handler_pid_for_user_id(ID, self()),
-            {[{text, util:encode_json(#{request_id => RequestID, success => #{register => true}})}], State#state{user_id = ID, authenticated = true}};
-        #{<<"request_id">> := RequestID, <<"login">> := Data} ->
-            #{<<"user_id">> := ID, <<"public_key">> := EncodedPublicKey} = Data,
-            PublicKey = store:get_public_key(ID),
-            case util:decode_public_key(list_to_binary(EncodedPublicKey)) =:= PublicKey of
+            {[{text, util:encode_json(#{request_id => RequestID, success => #{register => true}, ecdh_public_key => util:encode_data(ECDHPublicKey)})}], State#state{user_id = ID, authenticated = true, hmac_key = util:generate_hmac_key(ECDHPrivateKey, ClientECDHPublicKey)}};
+        #{<<"request_id">> := RequestID, <<"login">> := Data, <<"rsa_public_key">> := EncodedClientRSAPublicKey, <<"ecdh_public_key">> := EncodedClientECDHPublicKey} ->
+            #{<<"user_id">> := ID} = Data,
+            ClientECDHPublicKey = util:decode_data(EncodedClientECDHPublicKey),
+            ClientRSAPublicKey = store:get_public_key(ID),
+            case util:decode_public_key(list_to_binary(EncodedClientRSAPublicKey)) =:= ClientRSAPublicKey of
                 true ->
                     Challenge = util:generate_challenge(),
-                    {[{text, util:encode_json(#{request_id => RequestID, success => #{login => true}, challenge => Challenge})}], State#state{user_id = ID, challenge = {erlang:system_time(millisecond), Challenge}, public_key = PublicKey}};
+                    {[{text, util:encode_json(#{request_id => RequestID, success => #{login => true}, ecdh_public_key => util:encode_data(ECDHPublicKey), challenge => Challenge})}], State#state{user_id = ID, challenge = {erlang:system_time(millisecond), Challenge}, client_rsa_public_key = ClientRSAPublicKey, hmac_key = util:generate_hmac_key(ECDHPrivateKey, ClientECDHPublicKey)}};
                 false ->
                     {[{text, util:encode_json(#{request_id => RequestID, error => <<"Invalid Public Key">>})}], State}
             end;
+        #{<<"request_id">> := RequestID, <<"signed_challenge">> := EncodedSignedChallenge} ->
+            SignedChallenge = util:decode_data(EncodedSignedChallenge),
+            ClientRSAPublicKey = State#state.client_rsa_public_key,
+            UserID = State#state.user_id,
+            {ChallengeTimestamp, Challenge} = ChallengeTuple,
+            case util:verify_challenge(SignedChallenge, Challenge, ChallengeTimestamp, ClientRSAPublicKey) of
+                true ->
+                    io:format("Verification successful!"),
+                    store:set_handler_pid_for_user_id(UserID, self()),
+                    {[{text, util:encode_json(#{request_id => RequestID, success => #{challenge => true}})}], State#state{authenticated = true, challenge = undefined}};
+                false ->
+                    io:format("Verification failed!"),
+                    {[{text, util:encode_json(#{error => #{challenge => false}})}], State}
+            end;
         Request ->
             {[{text, util:encode_json(#{error => <<"403: User Not Logged in">>, request => Request})}], State}
-    end;
-websocket_handle({binary, SignedChallenge}, #state{user_id = UserID, authenticated = false, challenge = {ChallengeTimestamp, Challenge}, public_key = PublicKey} = State) ->
-    case util:verify_challenge(SignedChallenge, Challenge, ChallengeTimestamp, PublicKey) of
-        true ->
-            io:format("Verification successful!"),
-            store:set_handler_pid_for_user_id(UserID, self()),
-            {[{text, util:encode_json(#{success => #{challenge => true}})}], State#state{authenticated = true, challenge = undefined}};
-        false ->
-            io:format("Verification failed!"),
-            {[{text, util:encode_json(#{error => #{challenge => false}})}], State}
     end;
 websocket_handle({text, SerializedJSON}, #state{user_id = UserID, authenticated = true, challenge = undefined} = State) ->
     RequestMap = util:decode_json(SerializedJSON),
@@ -81,7 +90,7 @@ websocket_handle({text, SerializedJSON}, #state{user_id = UserID, authenticated 
             {[{text, util:encode_json(#{error => <<"Unknown Request">>, request => Request})}], State}
     end;
 websocket_handle(_Frame, State) ->
-    {ok, State}.
+    {[{text, util:encode_json(#{error => <<"Unknown Request">>})}], State}.
 
 websocket_info({tweet, TweetType, {PosterID, TweetContent}}, State) ->
     {[{text, util:encode_json(#{tweet => #{poster_id => PosterID, tweet_type => TweetType, content => TweetContent}})}], State};

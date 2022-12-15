@@ -42,9 +42,11 @@
     request_times = [],
     conn_pid,
     stream_ref,
-    key_pair,
+    rsa_key_pair,
+    ecdh_key_pair = util:generate_key_pair(ecdh),
     new_user,
-    authenticated = false
+    authenticated = false,
+    hmac_key
 }).
 
 %% API
@@ -63,10 +65,10 @@ query(UserID, Query) ->
 
 %% GEN SERVER IMPLEMENTATION
 init([UserID, N]) ->
-    {NewUser, KeyPair} =
+    {NewUser, RSAKeyPair} =
         case c_store:get_key_pair(UserID) of
             null ->
-                GeneratedKeyPair = util:generate_key_pair(),
+                GeneratedKeyPair = util:generate_key_pair(rsa),
                 c_store:store_key_pair(UserID, GeneratedKeyPair),
                 {true, GeneratedKeyPair};
             KP ->
@@ -80,7 +82,7 @@ init([UserID, N]) ->
         user_id = UserID,
         total_followers = trunc(math:floor((N * 2) / (IntID * 3))),
         conn_pid = ConnPid,
-        key_pair = KeyPair,
+        rsa_key_pair = RSAKeyPair,
         new_user = NewUser
     },
     {ok, State}.
@@ -189,7 +191,8 @@ handle_info(
         conn_pid = ConnPid,
         stream_ref = StreamRef,
         pending_requests = PendingRequests,
-        key_pair = {PublicKey, _},
+        rsa_key_pair = {RSAPublicKey, _},
+        ecdh_key_pair = {ECDHPublicKey, _},
         new_user = NewUser,
         authenticated = false
     } = State
@@ -197,11 +200,15 @@ handle_info(
     case NewUser of
         true ->
             RequestID = send_ws_message(ConnPid, StreamRef, #{
-                register => #{user_id => UserID, public_key => util:encode_public_key(PublicKey)}
+                register => #{user_id => UserID},
+                rsa_public_key => util:encode_public_key(RSAPublicKey), 
+                ecdh_public_key => util:encode_data(ECDHPublicKey)
             });
         false ->
             RequestID = send_ws_message(ConnPid, StreamRef, #{
-                login => #{user_id => UserID, public_key => util:encode_public_key(PublicKey)}
+                login => #{user_id => UserID}, 
+                rsa_public_key => util:encode_public_key(RSAPublicKey), 
+                ecdh_public_key => util:encode_data(ECDHPublicKey)
             })
     end,
     {noreply, State#state{pending_requests = [RequestID | PendingRequests]}};
@@ -216,12 +223,14 @@ handle_info(
         request_times = RequestTimes,
         pending_requests = PendingRequests,
         authenticated = false,
-        key_pair = {_, PrivateKey}
+        rsa_key_pair = {_, RSAPrivateKey},
+        ecdh_key_pair = {_, ECDHPrivateKey}
     } = State
 ) ->
     RequestMap = util:decode_json(SerializedJSON),
     case RequestMap of
-        #{<<"request_id">> := RequestID, <<"success">> := #{<<"register">> := true}} ->
+        #{<<"request_id">> := RequestID, <<"success">> := #{<<"register">> := true}, <<"ecdh_public_key">> := EncodedServerECDHPublicKey} ->
+            ServerECDHPublicKey = util:decode_data(EncodedServerECDHPublicKey),
             {UpdatedRequestTimes, UpdatedPendingRequests} = update_request_times(
                 register_account, RequestID, RequestTimes, PendingRequests
             ),
@@ -238,29 +247,43 @@ handle_info(
                     followers = Followers,
                     request_times = UpdatedRequestTimes,
                     pending_requests = UpdatedPendingRequests,
-                    authenticated = true
+                    authenticated = true,
+                    hmac_key = util:generate_hmac_key(ECDHPrivateKey, ServerECDHPublicKey)
                 },
                 ?START_TIME};
         #{
-            <<"request_id">> := _,
+            <<"request_id">> := RequestID,
             <<"success">> := #{<<"login">> := true},
-            <<"challenge">> := Challenge
+            <<"challenge">> := Challenge,
+            <<"ecdh_public_key">> := EncodedServerECDHPublicKey
         } ->
+            ServerECDHPublicKey = util:decode_data(EncodedServerECDHPublicKey),
             SignedChallenge = util:sign_challenge(
                 util:encode_json(#{
                     timestamp => erlang:system_time(millisecond), challenge => Challenge
                 }),
-                PrivateKey
+                RSAPrivateKey
             ),
-            gun:ws_send(ConnPid, StreamRef, {binary, SignedChallenge}),
-            {noreply, State};
-        #{<<"success">> := #{<<"challenge">> := true}} ->
+            RequestID = send_ws_message(RequestID, ConnPid, StreamRef, #{signed_challenge => util:encode_data(SignedChallenge)}),
+            {noreply, State#state{hmac_key = util:generate_hmac_key(ECDHPrivateKey, ServerECDHPublicKey)}};
+        #{<<"request_id">> := RequestID, <<"success">> := #{<<"challenge">> := true}} ->
             % store the self pid in table for others to read
             c_store:store_client_pid(UserID),
+            {UpdatedRequestTimes, UpdatedPendingRequests} = update_request_times(
+                login, RequestID, RequestTimes, PendingRequests
+            ),
             % start generating content
             schedule_tweet(),
             schedule_mention_query(),
-            {noreply, State#state{authenticated = true}}
+            {noreply, State#state{
+                authenticated = true,
+                request_times = UpdatedRequestTimes,
+                pending_requests = UpdatedPendingRequests
+            }};
+        #{<<"error">> := #{<<"challenge">> := false}} ->
+            ?PRINT("[~s] login failed!~n", [UserID]),
+            % restart the client to try logging in again
+            {stop, normal, State}
     end;
 %% acknowledgement messages
 handle_info(
@@ -375,6 +398,8 @@ code_change(_OldVsn, _State, _Extra) ->
 
 send_ws_message(ConnPid, StreamRef, Message) ->
     RequestID = erlang:system_time(nanosecond),
+    send_ws_message(RequestID, ConnPid, StreamRef, Message).
+send_ws_message(RequestID, ConnPid, StreamRef, Message) ->
     gun:ws_send(
         ConnPid,
         StreamRef,
