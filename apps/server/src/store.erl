@@ -24,7 +24,8 @@
     query_tweets/1,
     get_public_key/1,
     set_handler_pid_for_user_id/2,
-    get_handler_pid_from_user_id/1
+    get_handler_pid_from_user_id/1,
+    safely_delete_table/1
 ]).
 
 -define(USER_TABLE_NAME, user).
@@ -51,6 +52,8 @@
 }).
 
 init() ->
+    % perform cleanup if the tables already exist
+    cleanup(),
     TableOptions = [
         public,
         named_table,
@@ -66,12 +69,12 @@ init() ->
     ok.
 
 cleanup() ->
-    ets:delete(?USER_TABLE_NAME),
-    ets:delete(?TWEET_TABLE_NAME),
-    ets:delete(?MENTION_TABLE_NAME),
-    ets:delete(?HASHTAG_TABLE_NAME),
-    ets:delete(?PID_TABLE_NAME),
-    ets:delete(?PUBLIC_KEY_TABLE_NAME).
+    safely_delete_table(?USER_TABLE_NAME),
+    safely_delete_table(?TWEET_TABLE_NAME),
+    safely_delete_table(?MENTION_TABLE_NAME),
+    safely_delete_table(?HASHTAG_TABLE_NAME),
+    safely_delete_table(?PID_TABLE_NAME),
+    safely_delete_table(?PUBLIC_KEY_TABLE_NAME).
 
 get_value(TableName, TableKey) ->
     case ets:lookup(TableName, TableKey) of
@@ -247,3 +250,11 @@ set_handler_pid_for_user_id(ID, PID) ->
 get_handler_pid_from_user_id(ID) ->
     {_, PID} = get_value(?PID_TABLE_NAME, ID),
     PID.
+
+safely_delete_table(TableName) ->
+    case ets:whereis(TableName) of
+        undefined ->
+            ok;
+        _ ->
+            ets:delete(TableName)
+    end.

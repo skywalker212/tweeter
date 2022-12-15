@@ -3,11 +3,13 @@
 
 -export([
     start_link/2,
+    start/1,
     follow/2,
     tweet/2,
     re_tweet/2,
     mentions/1,
-    query/2
+    query/2,
+    disconnect/1
 ]).
 
 -export([
@@ -46,12 +48,20 @@
     ecdh_key_pair = util:generate_key_pair(ecdh),
     new_user,
     authenticated = false,
-    hmac_key
+    hmac_key,
+    standalone = false
 }).
 
 %% API
 start_link(UserID, N) ->
     gen_server:start_link(?MODULE, [UserID, N], []).
+start(UserID) ->
+    case c_store:get_client_pid(UserID) of
+        null ->
+            gen_server:start_link(?MODULE, [UserID], []);
+        _ ->
+            io:format("User ~p is already connected!~n", [UserID])
+    end.
 follow(UserID, FollowID) ->
     send_cast(UserID, {follow, FollowID}).
 tweet(UserID, Content) ->
@@ -62,9 +72,20 @@ mentions(UserID) ->
     send_cast(UserID, {mentions}).
 query(UserID, Query) ->
     send_cast(UserID, {query, Query}).
+disconnect(UserID) ->
+    case c_store:get_client_pid(UserID) of
+        null ->
+            io:format("User ~p is not logged in!~n", [UserID]);
+        PID ->
+            gen_server:stop(PID)
+    end.
 
 %% GEN SERVER IMPLEMENTATION
+init([UserID]) ->
+    init([UserID, 0, true]);
 init([UserID, N]) ->
+    init([UserID, N, false]);
+init([UserID, N, Standalone]) ->
     {NewUser, RSAKeyPair} =
         case c_store:get_key_pair(UserID) of
             null ->
@@ -76,15 +97,27 @@ init([UserID, N]) ->
         end,
     process_flag(trap_exit, true),
     {ok, ConnPid} = gun:open("localhost", 5000),
-    IntID = list_to_integer(UserID),
-    State = #state{
-        n = N,
-        user_id = UserID,
-        total_followers = trunc(math:floor((N * 2) / (IntID * 3))),
-        conn_pid = ConnPid,
-        rsa_key_pair = RSAKeyPair,
-        new_user = NewUser
-    },
+    State = case Standalone of
+        true ->
+            #state{
+                user_id = UserID,
+                conn_pid = ConnPid,
+                rsa_key_pair = RSAKeyPair,
+                new_user = NewUser,
+                standalone = true
+            };
+        false ->
+            IntID = list_to_integer(UserID),
+            #state{
+                n = N,
+                user_id = UserID,
+                total_followers = trunc(math:floor((N * 2) / (IntID * 3))),
+                conn_pid = ConnPid,
+                rsa_key_pair = RSAKeyPair,
+                new_user = NewUser,
+                standalone = false
+            }
+    end,
     {ok, State}.
 
 handle_call(_Msg, _From, State) ->
@@ -275,7 +308,8 @@ handle_info(
         pending_requests = PendingRequests,
         authenticated = false,
         rsa_key_pair = {_, RSAPrivateKey},
-        ecdh_key_pair = {_, ECDHPrivateKey}
+        ecdh_key_pair = {_, ECDHPrivateKey},
+        standalone = Standalone
     } = State
 ) ->
     RequestMap = util:decode_json(SerializedJSON),
@@ -290,22 +324,34 @@ handle_info(
                 register_account, RequestID, RequestTimes, PendingRequests
             ),
             ?PRINT("[~s, ~p] registered successfully~n", [UserID, RequestID]),
-            IntID = list_to_integer(UserID),
-            Followers = generate_follow_users(
-                TotalFollowers, lists:delete(IntID, lists:seq(1, N)), []
-            ),
             % store the self pid in table for others to read
             c_store:store_client_pid(UserID),
-            % wait for START_TIME milliseconds before making users follow current user so that other users have enough time to start up and register themselves
-            {noreply,
-                State#state{
-                    followers = Followers,
-                    request_times = UpdatedRequestTimes,
-                    pending_requests = UpdatedPendingRequests,
-                    authenticated = true,
-                    hmac_key = util:generate_hmac_key(ECDHPrivateKey, ServerECDHPublicKey)
-                },
-                ?START_TIME};
+            %% if starting as a standalone client then dont follow anyone automatically
+            case Standalone of
+                true ->
+                    {noreply,
+                        State#state{
+                            request_times = UpdatedRequestTimes,
+                            pending_requests = UpdatedPendingRequests,
+                            authenticated = true,
+                            hmac_key = util:generate_hmac_key(ECDHPrivateKey, ServerECDHPublicKey)
+                        }};
+                false ->
+                    IntID = list_to_integer(UserID),
+                    Followers = generate_follow_users(
+                        TotalFollowers, lists:delete(IntID, lists:seq(1, N)), []
+                    ),
+                    % wait for START_TIME milliseconds before making users follow current user so that other users have enough time to start up and register themselves
+                    {noreply,
+                        State#state{
+                            followers = Followers,
+                            request_times = UpdatedRequestTimes,
+                            pending_requests = UpdatedPendingRequests,
+                            authenticated = true,
+                            hmac_key = util:generate_hmac_key(ECDHPrivateKey, ServerECDHPublicKey)
+                        },
+                        ?START_TIME}
+            end;
         #{
             <<"request_id">> := RequestID,
             <<"success">> := #{<<"login">> := true},
@@ -331,9 +377,15 @@ handle_info(
             {UpdatedRequestTimes, UpdatedPendingRequests} = update_request_times(
                 login, RequestID, RequestTimes, PendingRequests
             ),
-            % start generating content
-            schedule_tweet(),
-            schedule_mention_query(),
+            % if working as a standalone client then dont generate automatic content
+            case Standalone of
+                true ->
+                    ok;
+                false ->
+                    % start generating content
+                    schedule_tweet(),
+                    schedule_mention_query()
+            end,
             io:format("[~p] client reconnected~n", [UserID]),
             {noreply, State#state{
                 authenticated = true,
@@ -414,6 +466,13 @@ handle_info(
         _ ->
             {noreply, State}
     end;
+%% connection close related stuff
+handle_info({gun_ws, _, _, {close, _, _}}, #state{ user_id = UserID } = State) ->
+    io:format("[~p] Client hasn't send any messages in a minutes, server requesting to close connection, reconnecting and logging in...~n", [UserID]),
+    {noreply, State};
+handle_info({gun_down, _ConnPid, _Protocol, _Reason, _Killed},State) ->
+    %% Do something.
+    {noreply, State#state{authenticated = false, new_user = false}};
 %% handle initial cooldown timeout before starting the simulation
 handle_info(timeout, #state{n = N, user_id = UserID, followers = Followers} = State) ->
     case c_store:get_alive_clients() of
@@ -436,20 +495,26 @@ handle_info(timeout, #state{n = N, user_id = UserID, followers = Followers} = St
 terminate(
     Reason,
     #state{
-        user_id = UserID, start_time = StartTime, request_times = RequestTimes, conn_pid = ConnPid
+        user_id = UserID, start_time = StartTime, request_times = RequestTimes, conn_pid = ConnPid, standalone = Standalone
     } = State
 ) ->
     c_store:delete_client_pid(UserID),
     ok = gun:shutdown(ConnPid),
-    RequestTimesDict = lists:foldr(
-        fun({K, V}, D) -> dict:append(K, V, D) end, dict:new(), RequestTimes
-    ),
-    TerminationReason =
-        case Reason of
-            normal -> disconnect;
-            Other -> Other
-        end,
-    gen_server:cast(main, {TerminationReason, UserID, StartTime, RequestTimesDict}),
+    case Standalone of
+        true ->
+            ok;
+        false ->
+            % if the client is a part of simulator then send statistics to the main process
+            RequestTimesDict = lists:foldr(
+                fun({K, V}, D) -> dict:append(K, V, D) end, dict:new(), RequestTimes
+            ),
+            TerminationReason =
+                case Reason of
+                    normal -> disconnect;
+                    Other -> Other
+                end,
+            gen_server:cast(main, {TerminationReason, UserID, StartTime, RequestTimesDict})
+    end,
     {stop, Reason, State}.
 code_change(_OldVsn, _State, _Extra) ->
     ok.
@@ -501,5 +566,9 @@ update_request_times(Operation, RequestID, RequestTimes, PendingRequests) ->
     {UpdatedRequestTimes, UpdatedPendingRequests}.
 
 send_cast(UserID, Message) ->
-    PID = c_store:get_client_pid(UserID),
-    gen_server:cast(PID, Message).
+    case c_store:get_client_pid(UserID) of
+        null ->
+            io:format("User ~p is not logged in!~n", [UserID]);
+        PID ->
+            gen_server:cast(PID, Message)
+    end.

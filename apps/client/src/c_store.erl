@@ -13,8 +13,11 @@
 
 -define(CLIENT_PID_TABLE_NAME, client_pid).
 -define(KEY_TABLE_NAME, key_table).
+-define(WORDS_TABLE_NAME, words).
 
 init() ->
+    % perform cleanup if the tables already exist
+    cleanup(),
     TableOptions = [
         public,
         named_table,
@@ -52,5 +55,6 @@ delete_client_pid(UserID) ->
     ets:delete(?CLIENT_PID_TABLE_NAME, UserID).
 
 cleanup() ->
-    ets:delete(?CLIENT_PID_TABLE_NAME),
-    ets:delete(?KEY_TABLE_NAME).
+    store:safely_delete_table(?CLIENT_PID_TABLE_NAME),
+    store:safely_delete_table(?WORDS_TABLE_NAME),
+    store:safely_delete_table(?KEY_TABLE_NAME).
