@@ -62,32 +62,39 @@ websocket_handle({text, SerializedJSON}, #state{authenticated = false, challenge
         Request ->
             {[{text, util:encode_json(#{error => <<"403: User Not Logged in">>, request => Request})}], State}
     end;
-websocket_handle({text, SerializedJSON}, #state{user_id = UserID, authenticated = true, challenge = undefined} = State) ->
-    RequestMap = util:decode_json(SerializedJSON),
-    case RequestMap of
-        #{<<"request_id">> := RequestID, <<"tweet">> := Data} ->
-            #{<<"content">> := TweetContent} = Data,
-            TweetID = UserID ++ integer_to_list(util:get_utc_seconds()),
-            store:save_tweet(TweetID, UserID, TweetContent),
-            notify_followers(UserID, {tweet, tweet, {UserID, TweetContent}}),
-            {[{text, util:encode_json(#{request_id => RequestID, success => #{tweet => #{type => tweet, id => TweetID}}})}], State};
-        #{<<"request_id">> := RequestID, <<"follow">> := Data} ->
-            #{<<"follow_id">> := FollowID} = Data,
-            store:follow_user(UserID, FollowID),
-            {[{text, util:encode_json(#{request_id => RequestID, success => #{follow => FollowID}})}], State};
-        #{<<"request_id">> := RequestID, <<"re_tweet">> := Data} ->
-            #{<<"tweet_id">> := TweetID} = Data,
-            RetweetID = UserID ++ integer_to_list(util:get_utc_seconds()),
-            store:re_tweet(RetweetID, TweetID, UserID),
-            Content = store:get_retweet_content(TweetID),
-            notify_followers(UserID, {tweet, re_tweet, {UserID, Content}}),
-            {[{text, util:encode_json(#{request_id => RequestID, success => #{tweet => #{type => re_tweet, id => RetweetID}}})}], State};
-        #{<<"request_id">> := RequestID, <<"mentions">> := _Data} ->
-            query(RequestID, "@" ++ UserID, State);
-        #{<<"request_id">> := RequestID, <<"query">> := Query} ->
-            query(RequestID, Query, State);
-        Request ->
-            {[{text, util:encode_json(#{error => <<"Unknown Request">>, request => Request})}], State}
+websocket_handle({text, SerializedJSON}, #state{user_id = UserID, authenticated = true, hmac_key = HMACKey} = State) ->
+    #{<<"data">> := RequestData, <<"hmac">> := EncodedHMAC} = util:decode_json(SerializedJSON),
+    case util:verify_hmac(HMACKey, util:encode_json(RequestData), util:decode_data(EncodedHMAC)) of
+        % HMAC Verification successful
+        true ->
+            case RequestData of
+                #{<<"request_id">> := RequestID, <<"tweet">> := Data} ->
+                    #{<<"content">> := TweetContent} = Data,
+                    TweetID = UserID ++ integer_to_list(util:get_utc_seconds()),
+                    store:save_tweet(TweetID, UserID, TweetContent),
+                    notify_followers(UserID, {tweet, tweet, {UserID, TweetContent}}),
+                    {[{text, util:encode_json(#{request_id => RequestID, success => #{tweet => #{type => tweet, id => TweetID}}})}], State};
+                #{<<"request_id">> := RequestID, <<"follow">> := Data} ->
+                    #{<<"follow_id">> := FollowID} = Data,
+                    store:follow_user(UserID, FollowID),
+                    {[{text, util:encode_json(#{request_id => RequestID, success => #{follow => FollowID}})}], State};
+                #{<<"request_id">> := RequestID, <<"re_tweet">> := Data} ->
+                    #{<<"tweet_id">> := TweetID} = Data,
+                    RetweetID = UserID ++ integer_to_list(util:get_utc_seconds()),
+                    store:re_tweet(RetweetID, TweetID, UserID),
+                    Content = store:get_retweet_content(TweetID),
+                    notify_followers(UserID, {tweet, re_tweet, {UserID, Content}}),
+                    {[{text, util:encode_json(#{request_id => RequestID, success => #{tweet => #{type => re_tweet, id => RetweetID}}})}], State};
+                #{<<"request_id">> := RequestID, <<"mentions">> := _Data} ->
+                    query(RequestID, "@" ++ UserID, State);
+                #{<<"request_id">> := RequestID, <<"query">> := Query} ->
+                    query(RequestID, Query, State);
+                Request ->
+                    {[{text, util:encode_json(#{error => <<"Unknown Request">>, request => Request})}], State}
+            end;
+        % HMAC Verification failed
+        false ->
+            {[{text, util:encode_json(#{error => <<"HMAC Verification Failed">>})}], State}
     end;
 websocket_handle(_Frame, State) ->
     {[{text, util:encode_json(#{error => <<"Unknown Request">>})}], State}.

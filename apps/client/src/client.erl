@@ -92,9 +92,9 @@ handle_call(_Msg, _From, State) ->
 
 handle_cast(
     {follow, FollowerID},
-    #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests} = State
+    #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests, hmac_key = HMACKey} = State
 ) ->
-    RequestID = send_ws_message(ConnPid, StreamRef, #{follow => #{follow_id => FollowerID}}),
+    RequestID = send_signed_ws_message(ConnPid, StreamRef, #{follow => #{follow_id => FollowerID}}, HMACKey),
     {noreply, State#state{pending_requests = [RequestID | PendingRequests]}};
 handle_cast(
     {schedule_tweet},
@@ -103,7 +103,8 @@ handle_cast(
         total_followers = TotalFollowers,
         pending_requests = PendingRequests,
         conn_pid = ConnPid,
-        stream_ref = StreamRef
+        stream_ref = StreamRef,
+        hmac_key = HMACKey
     } = State
 ) ->
     % code to make the users with more followers tweet more
@@ -118,14 +119,17 @@ handle_cast(
                             Request = [];
                         ID ->
                             Request = [
-                                send_ws_message(ConnPid, StreamRef, #{re_tweet => #{tweet_id => ID}})
+                                send_signed_ws_message(ConnPid, StreamRef, #{re_tweet => #{tweet_id => ID}}, HMACKey)
                             ]
                     end;
                 _ ->
                     Request = [
-                        send_ws_message(ConnPid, StreamRef, #{
-                            tweet => #{content => generator:generate_tweet(N)}
-                        })
+                        send_signed_ws_message(
+                            ConnPid, 
+                            StreamRef, 
+                            #{tweet => #{content => generator:generate_tweet(N)}},
+                            HMACKey
+                        )
                     ]
             end;
         _ ->
@@ -136,23 +140,23 @@ handle_cast(
     {noreply, State#state{pending_requests = PendingRequests ++ Request}};
 handle_cast(
     {tweet, TweetContent},
-    #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests} = State
+    #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests, hmac_key = HMACKey} = State
 ) ->
-    TweetRequest = send_ws_message(ConnPid, StreamRef, #{tweet => #{content => TweetContent}}),
+    TweetRequest = send_signed_ws_message(ConnPid, StreamRef, #{tweet => #{content => TweetContent}}, HMACKey),
     {noreply, State#state{pending_requests = [TweetRequest | PendingRequests]}};
 handle_cast(
     {re_tweet, TweetID},
-    #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests} = State
+    #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests, hmac_key = HMACKey} = State
 ) ->
-    RetweetRequest = send_ws_message(ConnPid, StreamRef, #{re_tweet => #{tweet_id => TweetID}}),
+    RetweetRequest = send_signed_ws_message(ConnPid, StreamRef, #{re_tweet => #{tweet_id => TweetID}}, HMACKey),
     {noreply, State#state{pending_requests = [RetweetRequest | PendingRequests]}};
 handle_cast(
     {schedule_mention_query},
-    #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests} = State
+    #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests, hmac_key = HMACKey} = State
 ) ->
     % make a mention query with 10% chance
     case rand:uniform(10) of
-        1 -> Request = [send_ws_message(ConnPid, StreamRef, #{mentions => true})];
+        1 -> Request = [send_signed_ws_message(ConnPid, StreamRef, #{mentions => true}, HMACKey)];
         _ -> Request = []
     end,
     % schedule next query
@@ -160,15 +164,15 @@ handle_cast(
     {noreply, State#state{pending_requests = PendingRequests ++ Request}};
 handle_cast(
     {mentions},
-    #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests} = State
+    #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests, hmac_key = HMACKey} = State
 ) ->
-    MentionRequest = send_ws_message(ConnPid, StreamRef, #{mentions => true}),
+    MentionRequest = send_signed_ws_message(ConnPid, StreamRef, #{mentions => true}, HMACKey),
     {noreply, State#state{pending_requests = [MentionRequest | PendingRequests]}};
 handle_cast(
     {query, Query},
-    #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests} = State
+    #state{conn_pid = ConnPid, stream_ref = StreamRef, pending_requests = PendingRequests, hmac_key = HMACKey} = State
 ) ->
-    QueryRequest = send_ws_message(ConnPid, StreamRef, #{query => Query}),
+    QueryRequest = send_signed_ws_message(ConnPid, StreamRef, #{query => Query}, HMACKey),
     {noreply, State#state{pending_requests = [QueryRequest | PendingRequests]}}.
 
 %% web socket connection establishment
@@ -404,6 +408,16 @@ send_ws_message(RequestID, ConnPid, StreamRef, Message) ->
         ConnPid,
         StreamRef,
         {text, util:encode_json(maps:merge(#{request_id => RequestID}, Message))}
+    ),
+    RequestID.
+send_signed_ws_message(ConnPid, StreamRef, Message, HMACKey) ->
+    RequestID = erlang:system_time(nanosecond),
+    Data = util:encode_json(maps:merge(#{request_id => RequestID}, Message)),
+    EncodedHMAC = util:encode_data(util:generate_hmac(HMACKey, Data)),
+    gun:ws_send(
+        ConnPid,
+        StreamRef,
+        {text, util:encode_json(#{data => maps:merge(#{request_id => RequestID}, Message), hmac => EncodedHMAC})}
     ),
     RequestID.
 

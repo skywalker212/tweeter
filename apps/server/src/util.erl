@@ -13,7 +13,9 @@
     encode_public_key/1,
     decode_public_key/1,
     sign_challenge/2,
-    verify_challenge/4
+    verify_challenge/4,
+    generate_hmac/2,
+    verify_hmac/3
 ]).
 -include_lib("public_key/include/public_key.hrl").
 
@@ -102,6 +104,11 @@ verify_challenge(SignedChallenge, OriginalChallenge, ChallengeTimestamp, PubKey)
     catch
         _ -> false
     end.
+
+generate_hmac(HMACKey, Data) ->
+    crypto:mac(hmac, sha3_256, HMACKey, Data).
+verify_hmac(HMACKey, Data, HMAC) ->
+    HMAC =:= generate_hmac(HMACKey, Data).
 
 generate_random_list(0, List) -> List;
 generate_random_list(N, List) -> generate_random_list(N - 1, [generate_random_char() | List]).
