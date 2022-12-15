@@ -1,9 +1,9 @@
 %%%-------------------------------------------------------------------
-%% @doc tweeter client top level supervisor.
+%% @doc tweeter client simulator top level supervisor.
 %% @end
 %%%-------------------------------------------------------------------
 
--module(client_sup).
+-module(client_simulator_sup).
 
 -behaviour(supervisor).
 

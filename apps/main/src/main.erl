@@ -25,7 +25,7 @@
 
 -define(SERVER_APP_NAME, server).
 
--define(CLIENT_APP_NAME, client).
+-define(CLIENT_APP_NAME, client_simulator).
 
 -record(state, {
     request_times = dict:new(),

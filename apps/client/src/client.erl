@@ -1,6 +1,7 @@
 -module(client).
 -behaviour(gen_server).
 
+% api to be used for using the client
 -export([
     start_link/2,
     start/1,
@@ -12,6 +13,7 @@
     disconnect/1
 ]).
 
+% functions for gen_server behavior
 -export([
     init/1,
     handle_call/3,
@@ -28,11 +30,7 @@
 %% Interval at which to query
 -define(QUERY_INTERVAL, 500).
 
--ifdef(prod).
--define(PRINT(S, A), ok).
--else.
 -define(PRINT(S, A), io:format(S, A)).
--endif.
 
 -record(state, {
     n = 1,
@@ -60,7 +58,7 @@ start(UserID) ->
         null ->
             gen_server:start_link(?MODULE, [UserID], []);
         _ ->
-            io:format("User ~p is already connected!~n", [UserID])
+            ?PRINT("User ~p is already connected!~n", [UserID])
     end.
 follow(UserID, FollowID) ->
     send_cast(UserID, {follow, FollowID}).
@@ -75,7 +73,7 @@ query(UserID, Query) ->
 disconnect(UserID) ->
     case c_store:get_client_pid(UserID) of
         null ->
-            io:format("User ~p is not logged in!~n", [UserID]);
+            ?PRINT("User ~p is not logged in!~n", [UserID]);
         PID ->
             gen_server:stop(PID)
     end.
@@ -184,7 +182,7 @@ handle_cast(
     % the way this works is if we stop the client process then the supervisor will automatically spawn a new client process and that process will log in as existing client and do the handshake and start making requests
     case rand:uniform(1000) of
         1 ->
-            io:format("[~p] client disconnecting.....~n", [UserID]),
+            ?PRINT("[~p] client disconnecting.....~n", [UserID]),
             {stop, normal, State#state{pending_requests = PendingRequests ++ Request}};
         _ ->
             {noreply, State#state{pending_requests = PendingRequests ++ Request}}
@@ -386,7 +384,7 @@ handle_info(
                     schedule_tweet(),
                     schedule_mention_query()
             end,
-            io:format("[~p] client reconnected~n", [UserID]),
+            ?PRINT("[~p] client logged in~n", [UserID]),
             {noreply, State#state{
                 authenticated = true,
                 request_times = UpdatedRequestTimes,
@@ -412,7 +410,7 @@ handle_info(
     RequestMap = util:decode_json(SerializedJSON),
     case RequestMap of
         #{<<"error">> := Data} ->
-            io:format("Error in request ~p ~n", [Data]),
+            ?PRINT("Error in request ~p ~n", [Data]),
             {noreply, State};
         #{
             <<"tweet">> := #{
@@ -468,7 +466,7 @@ handle_info(
     end;
 %% connection close related stuff
 handle_info({gun_ws, _, _, {close, _, _}}, #state{ user_id = UserID } = State) ->
-    io:format("[~p] Client hasn't send any messages in a minutes, server requesting to close connection, reconnecting and logging in...~n", [UserID]),
+    ?PRINT("[~p] Client hasn't send any messages in a minute so server has closed the connection, reconnecting and logging in...~n", [UserID]),
     {noreply, State};
 handle_info({gun_down, _ConnPid, _Protocol, _Reason, _Killed},State) ->
     %% Do something.
@@ -568,7 +566,7 @@ update_request_times(Operation, RequestID, RequestTimes, PendingRequests) ->
 send_cast(UserID, Message) ->
     case c_store:get_client_pid(UserID) of
         null ->
-            io:format("User ~p is not logged in!~n", [UserID]);
+            ?PRINT("User ~p is not logged in!~n", [UserID]);
         PID ->
             gen_server:cast(PID, Message)
     end.

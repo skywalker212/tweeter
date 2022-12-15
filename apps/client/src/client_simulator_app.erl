@@ -1,9 +1,9 @@
 %%%-------------------------------------------------------------------
-%% @doc tweeter client public API
+%% @doc tweeter client simulator public API
 %% @end
 %%%-------------------------------------------------------------------
 
--module(client_app).
+-module(client_simulator_app).
 
 -behaviour(application).
 
@@ -11,7 +11,7 @@
 
 start(_StartType, [N]) ->
     c_store:init(),
-    client_sup:start_link(N).
+    client_simulator_sup:start_link(N).
 
 stop(_State) ->
     c_store:cleanup(),
